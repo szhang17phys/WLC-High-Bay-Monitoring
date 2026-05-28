@@ -50,6 +50,9 @@ GITHUB_REMOTE       = 'origin'
 # ─── CONNECTION STATE ─────────────────────────────────────────────────────────
 _counter_online = True
 _last_seen      = None   # datetime of last successful data pull
+
+import threading
+_modbus_lock = threading.Lock()   # only one thread talks to the counter at a time
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -754,38 +757,37 @@ def mode_sample():
     params_written = False
 
     while True:
-        client = connect()
-        if client is None:
-            _counter_online = False
-            log(f"Connection failed — pushing last-known dashboard, retrying in {HOLD_TIME_S}s...")
-            mode_dashboard()
-            time.sleep(HOLD_TIME_S)
-            continue
-
-        try:
-            _counter_online = True
-
-            if not params_written:
-                set_params(client)
-                params_written = True
-
-            state = get_state(client)
-            log(f"State: {state}")
-
-            if state == 'Stopped':
-                start_sampling(client)
-
-            completed = wait_for_complete(client)
-
-            if completed:
-                mode_sync(client=client)
-                _last_seen = datetime.now()
+        with _modbus_lock:
+            client = connect()
+            if client is None:
+                _counter_online = False
+                log(f"Connection failed — pushing last-known dashboard, retrying in {HOLD_TIME_S}s...")
                 mode_dashboard()
+            else:
+                try:
+                    _counter_online = True
 
-        except Exception as e:
-            log(f"Error in sample loop: {e}", 'ERROR')
-        finally:
-            client.close()
+                    if not params_written:
+                        set_params(client)
+                        params_written = True
+
+                    state = get_state(client)
+                    log(f"State: {state}")
+
+                    if state == 'Stopped':
+                        start_sampling(client)
+
+                    completed = wait_for_complete(client)
+
+                    if completed:
+                        mode_sync(client=client)
+                        _last_seen = datetime.now()
+                        mode_dashboard()
+
+                except Exception as e:
+                    log(f"Error in sample loop: {e}", 'ERROR')
+                finally:
+                    client.close()
 
         log(f"Sleeping {HOLD_TIME_S}s until next sample...")
         time.sleep(HOLD_TIME_S)
@@ -853,21 +855,28 @@ def mode_live():
     log("  Ctrl+C to stop")
 
     while True:
-        client = connect()
-        if client is None:
-            time.sleep(30)
+        # skip this cycle if the sample thread is using the counter
+        if not _modbus_lock.acquire(blocking=False):
+            time.sleep(10)
             continue
         try:
-            data = read_live_snapshot(client)
-            if data:
-                save_to_csv([data], LIVE_CSV)
-                log(f"Live: temp={data.get('temp_C')}C "
-                    f"RH={data.get('RH_pct')}% "
-                    f"ch1_diff_m3={data.get('ch1_diff_m3')}")
-        except Exception as e:
-            log(f"Live error: {e}", 'ERROR')
+            client = connect()
+            if client is None:
+                time.sleep(30)
+                continue
+            try:
+                data = read_live_snapshot(client)
+                if data:
+                    save_to_csv([data], LIVE_CSV)
+                    log(f"Live: temp={data.get('temp_C')}C "
+                        f"RH={data.get('RH_pct')}% "
+                        f"ch1_diff_m3={data.get('ch1_diff_m3')}")
+            except Exception as e:
+                log(f"Live error: {e}", 'ERROR')
+            finally:
+                client.close()
         finally:
-            client.close()
+            _modbus_lock.release()
         time.sleep(10)
 
 
