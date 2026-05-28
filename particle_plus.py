@@ -750,12 +750,12 @@ def mode_sample():
     log(f"  Sampling every {HOLD_TIME_S}s ({HOLD_TIME_S//60} min)")
     log("="*55)
 
+    global _counter_online, _last_seen
     params_written = False
 
     while True:
         client = connect()
         if client is None:
-            global _counter_online, _last_seen
             _counter_online = False
             log(f"Connection failed — pushing last-known dashboard, retrying in {HOLD_TIME_S}s...")
             mode_dashboard()
@@ -763,7 +763,6 @@ def mode_sample():
             continue
 
         try:
-            global _counter_online, _last_seen
             _counter_online = True
 
             if not params_written:
