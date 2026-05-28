@@ -700,9 +700,12 @@ def push_to_github(repo_dir, csv_path):
     # generate fresh dashboard
     generate_dashboard_html(csv_path, html_path)
 
-    # copy latest CSV into repo
-    shutil.copy2(csv_path, csv_dest)
-    log(f"Copied CSV → {csv_dest}")
+    # copy latest CSV into repo (skip if not yet created)
+    if os.path.exists(csv_path):
+        shutil.copy2(csv_path, csv_dest)
+        log(f"Copied CSV → {csv_dest}")
+    else:
+        log(f"CSV not yet created, skipping copy")
 
     # git add + commit + push
     cmds = [
