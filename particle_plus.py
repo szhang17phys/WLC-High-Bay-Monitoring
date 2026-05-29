@@ -31,6 +31,7 @@ OUTPUT_CSV   = f'{BASE_DIR}/particle_data_archive.csv'
 LIVE_CSV     = f'{BASE_DIR}/particle_data_live.csv'
 LOG_FILE     = f'{BASE_DIR}/sync_log.txt'
 PID_FILE     = f'{BASE_DIR}/particle_plus.pid'
+SESSION_FILE = f'{BASE_DIR}/session_baseline.txt'  # records pre-existing before this session
 
 # sampling schedule
 SAMPLE_TIME_S       = 60      # 1 minute sample
@@ -379,41 +380,30 @@ def generate_dashboard_html(csv_path, output_path):
                     pass
         return None  # no fake fallback — records without real timestamps are excluded from charts
 
-    # only include records that have a real timestamp (confirms they were actually synced)
-    chart_records = [r for r in recent if get_real_ts(r) is not None]
+    # session baseline: records that existed on the counter BEFORE this monitoring session
+    # started — their sync_time is just "when we bulk-read them", not when they were measured.
+    # Only records with record_number > session_baseline have accurate timestamps.
+    _session_baseline = 0
+    if os.path.exists(SESSION_FILE):
+        try:
+            with open(SESSION_FILE) as _sb:
+                _session_baseline = int(_sb.read().strip())
+        except Exception:
+            pass
 
-    # The counter does NOT timestamp stored records — sync_time is when we READ the record,
-    # not when the measurement was taken. All records in one sync batch get sync_times
-    # within seconds of each other, which is meaningless as a time axis.
-    # Correct approach: anchor the LAST record to its sync_time, then space all previous
-    # records backward at HOLD_TIME_S (30 min) intervals — the actual sampling cadence.
+    chart_records = []
     timestamps = []
-    if chart_records:
-        last_r = chart_records[-1]
-        last_dt = None
-        for _k in ('sync_time', 'snapshot_time'):
-            _v = last_r.get(_k, '').strip()
-            if _v:
-                try:
-                    last_dt = datetime.fromisoformat(_v)
-                    break
-                except Exception:
-                    pass
-        if last_dt is None:
-            _raw = get_real_ts(last_r)
-            if _raw:
-                try:
-                    last_dt = datetime.strptime(_raw, '%Y-%m-%d %H:%M:%S')
-                except Exception:
-                    pass
-        n_cr = len(chart_records)
-        if last_dt is not None:
-            timestamps = [
-                (last_dt - timedelta(seconds=HOLD_TIME_S * (n_cr - 1 - i))).strftime('%Y-%m-%d %H:%M:%S')
-                for i in range(n_cr)
-            ]
-        else:
-            timestamps = [get_real_ts(r) or '' for r in chart_records]
+    for r in recent:
+        ts = get_real_ts(r)
+        if ts is None:
+            continue
+        try:
+            rec_num = int(float(r.get('record_number', 0) or 0))
+        except (ValueError, TypeError):
+            rec_num = 0
+        if rec_num > _session_baseline:
+            chart_records.append(r)
+            timestamps.append(ts)
 
     ch_colors = ['#00b4d8', '#2ecc71', '#e74c3c', '#f39c12', '#9b59b6', '#1abc9c']
     pm_colors = ['#ff6b6b', '#ff9f43', '#ffd32a', '#0be881', '#67e8f9', '#c084fc']
@@ -1023,6 +1013,20 @@ def mode_all():
     # write PID so --stop can find and signal this process
     with open(PID_FILE, 'w') as _pf:
         _pf.write(str(os.getpid()))
+
+    # record how many records the counter already had before this session —
+    # those are pre-existing data of unknown age and will be excluded from charts
+    try:
+        _cl = connect()
+        if _cl:
+            _baseline = get_record_count(_cl)
+            _cl.close()
+            with open(SESSION_FILE, 'w') as _sf:
+                _sf.write(str(_baseline))
+            log(f"Session baseline: {_baseline} pre-existing counter records (excluded from charts)")
+    except Exception as _e:
+        log(f"Could not read session baseline: {_e}", 'WARN')
+
     try:
         t_live = threading.Thread(target=mode_live, daemon=True)
         t_live.start()
