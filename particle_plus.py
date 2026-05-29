@@ -395,15 +395,43 @@ def generate_dashboard_html(csv_path, output_path):
 
     ch_counts = {i: [sf(r.get(f'ch{i}_diff_counts')) for r in recent] for i in range(1, 7)}
     ch_pm     = {i: [sf(r.get(f'ch{i}_pm_ugm3'))     for r in recent] for i in range(1, 7)}
-    temp_f    = [c_to_f(sf(r.get('temp_C')))  for r in recent]
-    rh_vals   = [sf(r.get('RH_pct'))           for r in recent]
     flow_vals = [sf(r.get('flow_CFM'))         for r in recent]
+
+    # ── live CSV: counter only stores temp/RH in the live reading (record 0),
+    #    not in historical records — read LIVE_CSV for the env chart/cards ──────
+    live_cutoff = datetime.now() - timedelta(hours=24)
+    live_ts      = []
+    live_temp_f  = []
+    live_rh_vals = []
+    if os.path.exists(LIVE_CSV):
+        with open(LIVE_CSV, 'r') as _lf:
+            for _lr in csv.DictReader(_lf):
+                _ts = _lr.get('snapshot_time', '').strip()
+                if not _ts:
+                    continue
+                try:
+                    _dt = datetime.fromisoformat(_ts)
+                    if _dt >= live_cutoff:
+                        live_ts.append(_dt.strftime('%Y-%m-%d %H:%M:%S'))
+                        live_temp_f.append(c_to_f(sf(_lr.get('temp_C'))))
+                        live_rh_vals.append(sf(_lr.get('RH_pct')))
+                except Exception:
+                    pass
 
     # ── status strip ──────────────────────────────────────────────────────────
     lv_temp_c = latest_val('temp_C')
     last_temp_f = f'{c_to_f(lv_temp_c):.1f}' if lv_temp_c is not None else '—'
     lv_rh   = latest_val('RH_pct')
     last_rh = f'{lv_rh:.1f}'  if lv_rh  is not None else '—'
+    # override env cards with latest live reading if available (live has real values)
+    if live_temp_f:
+        _ltf = next((v for v in reversed(live_temp_f) if v is not None), None)
+        if _ltf is not None:
+            last_temp_f = f'{_ltf:.1f}'
+    if live_rh_vals:
+        _lrh = next((v for v in reversed(live_rh_vals) if v is not None), None)
+        if _lrh is not None:
+            last_rh = f'{_lrh:.1f}'
     lv_flow = latest_val('flow_CFM')
     last_flow = f'{lv_flow:.4f}' if lv_flow is not None else '—'
     last_ts   = timestamps[-1] if timestamps else '—'
@@ -480,8 +508,9 @@ def generate_dashboard_html(csv_path, output_path):
     ch2_pm_js     = json.dumps(ch_pm[2])
     ch1_lbl       = ch_sizes.get(1, '0.3')
     ch2_lbl       = ch_sizes.get(2, '0.5')
-    temp_f_js     = json.dumps(temp_f)
-    rh_js         = json.dumps(rh_vals)
+    live_ts_js    = json.dumps(live_ts)
+    temp_f_js     = json.dumps(live_temp_f)
+    rh_js         = json.dumps(live_rh_vals)
 
     updated = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
@@ -633,7 +662,8 @@ const PM     = {pm_traces_js};
 const DIST   = {dist_traces_js};
 const CH1_C  = {ch1_counts_js};
 const CH2_PM = {ch2_pm_js};
-const TEMP_F = {temp_f_js};
+const LIVE_TS = {live_ts_js};
+const TEMP_F  = {temp_f_js};
 const RH_VALS = {rh_js};
 
 const DARK = {{
@@ -690,12 +720,17 @@ function filterAndRender() {{
       xaxis: Object.assign({{}}, DARK.xaxis, {{ title: 'Particle Size' }}),
     }}), {{responsive: true, displaylogo: false}});
 
+  const livei = (LIVE_TS.length === 0 || !mins) ? 0 : (() => {{
+    const cut = new Date(new Date(LIVE_TS[LIVE_TS.length - 1]) - mins * 60000);
+    const j = LIVE_TS.findIndex(t => new Date(t) >= cut);
+    return j < 0 ? LIVE_TS.length - 1 : j;
+  }})();
   Plotly.react('chart-env', [
-    {{ x: ts, y: TEMP_F.slice(i),  name: 'Temperature (\u00b0F)',
-       type: 'scatter', mode: 'lines+markers',
+    {{ x: LIVE_TS.slice(livei), y: TEMP_F.slice(livei),  name: 'Temperature (\u00b0F)',
+       type: 'scatter', mode: 'lines',
        line: {{ color: '#ff6b6b', width: 2 }}, yaxis: 'y' }},
-    {{ x: ts, y: RH_VALS.slice(i), name: 'Humidity (%)',
-       type: 'scatter', mode: 'lines+markers',
+    {{ x: LIVE_TS.slice(livei), y: RH_VALS.slice(livei), name: 'Humidity (%)',
+       type: 'scatter', mode: 'lines',
        line: {{ color: '#4ecdc4', width: 2 }}, yaxis: 'y2' }},
   ], Object.assign({{}}, DARK, {{
     xaxis:  Object.assign({{}}, DARK.xaxis,  {{ title: '' }}),
