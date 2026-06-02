@@ -915,11 +915,11 @@ def push_to_github(repo_dir, csv_path):
     # generate fresh dashboard
     generate_dashboard_html(csv_path, html_path)
 
-    # copy latest CSV into repo (skip if not yet created)
-    if os.path.exists(csv_path):
+    # copy latest CSV into repo (skip if same file or not yet created)
+    if os.path.exists(csv_path) and not os.path.samefile(csv_path, csv_dest):
         shutil.copy2(csv_path, csv_dest)
         log(f"Copied CSV → {csv_dest}")
-    else:
+    elif not os.path.exists(csv_path):
         log(f"CSV not yet created, skipping copy")
 
     # git add + commit + push
