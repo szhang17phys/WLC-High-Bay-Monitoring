@@ -87,7 +87,7 @@
   <div class="sub">Particle Plus Model 7301 &nbsp;&middot;&nbsp; Real-time Particulate &amp; Environmental Dashboard</div>
 </div>
 
-<div style="background:#7f1d1d;border:1px solid #991b1b;color:#fca5a5;border-radius:6px;padding:10px 16px;margin-bottom:16px;font-size:13px;">&#9888; Particle counter OFFLINE &mdash; last connected: unknown &mdash; retrying every 30 min. Showing last recorded data.</div>
+
 
 <div class="controls">
   <div class="ctrl-group">
@@ -105,11 +105,11 @@
     </select>
   </div>
   <div class="iso-wrap"><div class="iso-lbl">Clean Room Class</div><div class="iso-badge" style="color:#6b7280;border-color:#6b7280;">ISO —</div></div>
-  <div class="updated">Last pushed: 2026-06-02 13:34:53</div>
+  <div class="updated">Last pushed: 2026-06-02 13:53:00</div>
 </div>
 
 <div class="status-strip"><div class="kv"><span class="k">Flow: </span><span class="v">— CFM</span></div><div class="kv"><span class="k">Samples: </span><span class="v">0</span></div><div class="kv"><span class="k">Last sample: </span><span class="v">—</span></div><div class="kv"><span class="k">Laser: </span><span class="v ">—</span></div><div class="kv"><span class="k">Flow: </span><span class="v ">—</span></div><div class="kv"><span class="k">Temp: </span><span class="v ">—</span></div><div class="kv"><span class="k">RH: </span><span class="v ">—</span></div></div>
-<div class="cards"><div class="card" style="border-top:3px solid #ff6b6b"><div class="card-label">Temperature</div><span class="card-val" style="color:#ff6b6b">—</span><span class="card-unit">°F</span></div><div class="card" style="border-top:3px solid #4ecdc4"><div class="card-label">Humidity</div><span class="card-val" style="color:#4ecdc4">—</span><span class="card-unit">%</span></div><div class="card" style="border-top:3px solid #45b7d1"><div class="card-label">Flow Rate</div><span class="card-val" style="color:#45b7d1">—</span><span class="card-unit">CFM</span></div></div>
+<div class="cards"><div class="card" style="border-top:3px solid #ff6b6b"><div class="card-label">Temperature</div><span class="card-val" style="color:#ff6b6b">68.9</span><span class="card-unit">°F</span></div><div class="card" style="border-top:3px solid #4ecdc4"><div class="card-label">Humidity</div><span class="card-val" style="color:#4ecdc4">41.0</span><span class="card-unit">%</span></div><div class="card" style="border-top:3px solid #45b7d1"><div class="card-label">Flow Rate</div><span class="card-val" style="color:#45b7d1">—</span><span class="card-unit">CFM</span></div></div>
 
 <div class="chart-panel">
   <div class="chart-title">Particle Counts Over Time &nbsp;&#8212; all 6 size channels (log scale, counts / sample)</div>
@@ -139,9 +139,9 @@ const PM     = [{"x": [], "y": [], "name": "PM\u22651\u00b5m", "type": "scatter"
 const DIST   = [{"x": ["\u22651\u00b5m", "\u22652\u00b5m", "\u22653\u00b5m", "\u22654\u00b5m", "\u22655\u00b5m", "\u22656\u00b5m"], "y": [0.5, 0.5, 0.5, 0.5, 0.5, 0.5], "type": "bar", "marker": {"color": ["#00b4d8", "#2ecc71", "#e74c3c", "#f39c12", "#9b59b6", "#1abc9c"], "line": {"color": "#334155", "width": 1}}, "text": ["0", "0", "0", "0", "0", "0"], "textposition": "outside", "textfont": {"color": "#9ca3af", "size": 11}}];
 const CH1_C  = [];
 const CH2_PM = [];
-const LIVE_TS = [];
-const TEMP_F  = [];
-const RH_VALS = [];
+const LIVE_TS = ["2026-06-02 13:52:06", "2026-06-02 13:52:17", "2026-06-02 13:52:27", "2026-06-02 13:52:38", "2026-06-02 13:52:59"];
+const TEMP_F  = [68.7, 68.7, 68.7, 68.9, 68.9];
+const RH_VALS = [41.0, 45.0, 43.0, 41.0, 41.0];
 
 const DARK = {
   paper_bgcolor: '#0f172a',
