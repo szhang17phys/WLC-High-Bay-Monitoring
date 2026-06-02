@@ -709,7 +709,6 @@ def generate_dashboard_html(csv_path, output_path):
   .updated {{ font-size: 11px; color: #4b5563; align-self: flex-end; padding-bottom: 6px; }}
   .iso-badge {{
     display: inline-block; align-self: flex-end; margin-bottom: 6px;
-    margin-left: auto;
     font-size: 14px; font-weight: bold; letter-spacing: 3px;
     border: 1.5px solid; border-radius: 6px;
     padding: 4px 16px; font-family: inherit;
@@ -772,6 +771,7 @@ def generate_dashboard_html(csv_path, output_path):
     </select>
   </div>
   <div class="updated">Last pushed: {updated}</div>
+  <div style="flex:1"></div>
   {iso_badge_html}
 </div>
 
