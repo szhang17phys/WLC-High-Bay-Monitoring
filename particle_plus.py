@@ -100,26 +100,21 @@ def encode_i32(value):
     return encode_u32(value)
 
 def decode_string(registers):
+    # Device stores one ASCII character per register in the LOW byte (high byte is always 0x00)
     result = ''
     for reg in registers:
-        high = (reg >> 8) & 0xFF
-        low  =  reg       & 0xFF
-        if high == 0:
-            break
-        result += chr(high)
+        low = reg & 0xFF
         if low == 0:
             break
         result += chr(low)
     return result.strip()
 
 def encode_string(text, num_regs):
-    """Encode a string into Modbus registers (high byte = first char, zero-terminated)."""
+    """Encode a string into Modbus registers (one char per register in the low byte, zero-terminated)."""
     regs = []
-    i = 0
-    while len(regs) < num_regs:
-        high = ord(text[i]) if i < len(text) else 0; i += 1
-        low  = ord(text[i]) if i < len(text) else 0; i += 1
-        regs.append((high << 8) | low)
+    for i in range(num_regs):
+        low = ord(text[i]) if i < len(text) else 0
+        regs.append(low)
     return regs
 
 
