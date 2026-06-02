@@ -381,64 +381,85 @@ def generate_dashboard_html(csv_path, output_path):
                     pass
         return None  # no fake fallback — records without real timestamps are excluded from charts
 
-    # session baseline: records <= baseline were on the counter before this session started;
-    # their sync_time is a bulk-read timestamp, not the actual measurement time.
-    # Approach: session records (> baseline) use their real sync_time; pre-session records
-    # get estimated times by spacing backward at HOLD_TIME_S from the first session record.
-    _session_baseline = 0
-    if os.path.exists(SESSION_FILE):
-        try:
-            with open(SESSION_FILE) as _sb:
-                _session_baseline = int(_sb.read().strip())
-        except Exception:
-            pass
+    # ── batch-aware timestamp assignment ─────────────────────────────────────
+    # The counter never populates its internal date/time fields; the only
+    # timestamp available is sync_time (when the Pi read the record via Modbus).
+    #
+    # Two modes of syncing:
+    #   • Bulk sync  — many records read back-to-back; consecutive sync_times
+    #                  are only ~0.35 s apart.  sync_time is meaningless as a
+    #                  measurement timestamp; we estimate backward instead.
+    #   • Individual — one new record synced right after a sample completes;
+    #                  sync_time ≈ actual measurement time (accurate).
+    #
+    # Detection: if two consecutive records have sync_times within
+    # _BULK_THRESHOLD_S of each other, they belong to the same bulk batch.
+    # Otherwise each record is an individual sync.
+    #
+    # For bulk batches: anchor = last record's sync_time, then space all
+    # records backward at HOLD_TIME_S intervals (one step per record).
+    # For individual records: use sync_time directly.
 
-    # collect ALL records (ts may be None if CSV header pre-dates sync_time field)
+    _BULK_THRESHOLD_S = 60   # <60 s gap between consecutive sync_times → bulk
+
+    # collect records sorted by record_number
     _all_ts = []
     for r in recent:
-        ts = get_real_ts(r)  # may be None
+        ts = get_real_ts(r)
         try:
             rec_num = int(float(r.get('record_number', 0) or 0))
         except (ValueError, TypeError):
             rec_num = 0
-        _all_ts.append((rec_num, r, ts))
-    _all_ts.sort(key=lambda x: x[0])
-
-    # find anchor: first session record with a real timestamp
-    _anchor_dt = None
-    for _rn, _r, _ts in _all_ts:
-        if _rn > _session_baseline and _ts is not None:
+        # parse datetime for gap detection
+        _dt = None
+        if ts:
             try:
-                _anchor_dt = datetime.strptime(_ts, '%Y-%m-%d %H:%M:%S')
+                _dt = datetime.fromisoformat(ts.replace(' ', 'T').split('+')[0])
             except Exception:
                 pass
-            break
-    # fallback: last record with any real timestamp
-    if _anchor_dt is None:
-        for _rn, _r, _ts in reversed(_all_ts):
-            if _ts is not None:
-                try:
-                    _anchor_dt = datetime.strptime(_ts, '%Y-%m-%d %H:%M:%S')
-                    break
-                except Exception:
-                    pass
-    # final fallback: if no real timestamps at all, anchor to now
-    if _anchor_dt is None and _all_ts:
-        _anchor_dt = datetime.now()
+        _all_ts.append((rec_num, r, ts, _dt))
+    _all_ts.sort(key=lambda x: x[0])
 
-    chart_records = []
-    timestamps = []
-    for _rn, _r, _ts in _all_ts:
-        chart_records.append(_r)
-        if _rn > _session_baseline and _ts is not None:
-            timestamps.append(_ts)           # accurate sync_time
-        elif _anchor_dt is not None:
-            # estimate: each step is HOLD_TIME_S before the anchor
-            _steps = _session_baseline - _rn + 1 if _rn <= _session_baseline else 0
-            _est = (_anchor_dt - timedelta(seconds=HOLD_TIME_S * _steps)).strftime('%Y-%m-%d %H:%M:%S')
-            timestamps.append(_est)
+    # split into batches
+    _batches = []
+    _cur = []
+    for item in _all_ts:
+        if not _cur:
+            _cur.append(item)
         else:
-            timestamps.append(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            _prev_dt = next((x[3] for x in reversed(_cur) if x[3] is not None), None)
+            _this_dt = item[3]
+            if (_prev_dt is not None and _this_dt is not None and
+                    (_this_dt - _prev_dt).total_seconds() <= _BULK_THRESHOLD_S):
+                _cur.append(item)          # same bulk batch
+            else:
+                _batches.append(_cur)
+                _cur = [item]              # start new batch
+    if _cur:
+        _batches.append(_cur)
+
+    # assign timestamps batch by batch
+    chart_records = []
+    timestamps    = []
+    for _batch in _batches:
+        _n = len(_batch)
+        _anchor = next((x[3] for x in reversed(_batch) if x[3] is not None), None) \
+                  or datetime.now()
+        if _n <= 2:
+            # individual sync(s) — sync_time ≈ measurement time
+            for _rn, _r, _ts, _dt in _batch:
+                timestamps.append(_anchor.strftime('%Y-%m-%d %H:%M:%S')
+                                   if _dt is None else _dt.strftime('%Y-%m-%d %H:%M:%S'))
+                chart_records.append(_r)
+        else:
+            # bulk batch — estimate backward from last record's sync_time
+            _est_ts = [
+                (_anchor - timedelta(seconds=HOLD_TIME_S * (_n - 1 - _i)))
+                .strftime('%Y-%m-%d %H:%M:%S')
+                for _i in range(_n)
+            ]
+            timestamps.extend(_est_ts)
+            chart_records.extend([x[1] for x in _batch])
 
     # Step-hold: use real timestamps directly — with line.shape='hv' in Plotly,
     # each measured value is held horizontally until the next measurement arrives.
