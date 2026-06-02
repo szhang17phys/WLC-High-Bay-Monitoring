@@ -440,28 +440,12 @@ def generate_dashboard_html(csv_path, output_path):
         else:
             timestamps.append(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
 
-    # ── gap-marker post-processing ───────────────────────────────────────────
-    # If consecutive timestamps are > 1 hr apart, insert a None-valued sentinel
-    # point one sample-period (HOLD_TIME_S) after the last real point.
-    # This breaks the step chart so no stale value is held across a long gap.
-    _GAP_THRESHOLD_S = 3600
-    _aug_ts  = []
-    _aug_rec = []
-    for _gi in range(len(timestamps)):
-        _aug_ts.append(timestamps[_gi])
-        _aug_rec.append(chart_records[_gi])
-        if _gi + 1 < len(timestamps):
-            try:
-                _dt_a = datetime.strptime(timestamps[_gi],     '%Y-%m-%d %H:%M:%S')
-                _dt_b = datetime.strptime(timestamps[_gi + 1], '%Y-%m-%d %H:%M:%S')
-                if (_dt_b - _dt_a).total_seconds() > _GAP_THRESHOLD_S:
-                    _gap_ts = (_dt_a + timedelta(seconds=HOLD_TIME_S)).strftime('%Y-%m-%d %H:%M:%S')
-                    _aug_ts.append(_gap_ts)
-                    _aug_rec.append(None)   # sentinel — renders as blank in Plotly
-            except Exception:
-                pass
-    _plot_timestamps = _aug_ts
-    _plot_records    = _aug_rec
+    # Step-hold: use real timestamps directly — with line.shape='hv' in Plotly,
+    # each measured value is held horizontally until the next measurement arrives.
+    # No gap sentinels: a long offline period shows as a flat held line, which
+    # correctly represents "last known value" rather than a misleading blank.
+    _plot_timestamps = timestamps
+    _plot_records    = chart_records
 
     ch_colors = ['#00b4d8', '#2ecc71', '#e74c3c', '#f39c12', '#9b59b6', '#1abc9c']
     pm_colors = ['#ff6b6b', '#ff9f43', '#ffd32a', '#0be881', '#67e8f9', '#c084fc']
@@ -672,7 +656,7 @@ def generate_dashboard_html(csv_path, output_path):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="1800">
-<title>Wright Lab &#8212; DUNE Clean Room Monitor</title>
+<title>Wright Lab &#8212; DUNE High Bay Clean Room Monitoring</title>
 <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
 <style>
   *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
@@ -749,7 +733,7 @@ def generate_dashboard_html(csv_path, output_path):
 <body>
 
 <div class="header">
-  <h1>WRIGHT LAB &#8212; HIGH BAY DUNE CLEAN ROOM MONITORING</h1>
+  <h1>WRIGHT LAB &#8212; DUNE HIGH BAY CLEAN ROOM MONITORING</h1>
   <div class="sub">Particle Plus Model 7301 &nbsp;&middot;&nbsp; Real-time Particulate &amp; Environmental Dashboard</div>
 </div>
 
