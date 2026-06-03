@@ -43,6 +43,7 @@ CYCLES              = 1       # 1 sample per cycle then hold
 # sync/erase
 ERASE_AFTER_SYNC    = False   # set True after verifying data
 MIN_RECORDS_TO_SYNC = 1
+TRIM_CAP            = 10_000  # auto-erase when counter exceeds this many records
 
 # github — repo root = BASE_DIR so index.html lands at root (GitHub Pages)
 GITHUB_REPO_DIR     = BASE_DIR
@@ -1448,7 +1449,9 @@ def mode_sync(client=None):
             log(f"WARNING: {len(failed)} failed — NOT erasing", 'WARN')
             return False
 
-        if ERASE_AFTER_SYNC and saved:
+        if saved and (ERASE_AFTER_SYNC or total > TRIM_CAP):
+            if total > TRIM_CAP:
+                log(f"Counter at {total} records (>{TRIM_CAP}) — auto-erasing to free storage")
             erase_counter(client)
 
         return True
@@ -1495,6 +1498,14 @@ def mode_live():
         finally:
             _modbus_lock.release()
         time.sleep(10)
+
+
+def mode_trim():
+    """Flush new records to CSV then erase counter if above TRIM_CAP."""
+    log(f"MODE: --trim  (cap={TRIM_CAP})")
+    import trim_counter as _tc
+    _tc.OUTPUT_CSV = OUTPUT_CSV   # use same archive path as particle_plus
+    return _tc.trim_if_full(cap=TRIM_CAP)
 
 
 def mode_dashboard():
@@ -1557,6 +1568,8 @@ def main():
                         help='Run everything (recommended for tmux)')
     parser.add_argument('--stop',      action='store_true',
                         help='Gracefully stop a running --all instance')
+    parser.add_argument('--trim',      action='store_true',
+                        help=f'Flush + erase counter if records > TRIM_CAP ({TRIM_CAP})')
     args = parser.parse_args()
 
     os.makedirs(BASE_DIR, exist_ok=True)
@@ -1582,6 +1595,8 @@ def main():
         mode_dashboard()
     elif args.all:
         mode_all()
+    elif args.trim:
+        mode_trim()
     else:
         parser.print_help()
 
