@@ -583,16 +583,29 @@ def generate_dashboard_html(csv_path, output_path):
     live_rh_vals = []
     if os.path.exists(LIVE_CSV):
         with open(LIVE_CSV, 'r') as _lf:
-            for _lr in csv.DictReader(_lf):
-                _ts = _lr.get('snapshot_time', '').strip()
+            _raw = csv.reader(_lf)
+            _hdr = next(_raw, [])
+            # snapshot_time is always the last column regardless of row width.
+            # temp_C / RH_pct are at fixed header positions, but an extra
+            # timestamp_valid column was added mid-stream to newer rows,
+            # shifting every field after rh_ok by 1.  Detect and correct.
+            _tc_col = _hdr.index('temp_C') if 'temp_C' in _hdr else None
+            _rh_col = _hdr.index('RH_pct') if 'RH_pct' in _hdr else None
+            for _row in _raw:
+                if not _row:
+                    continue
+                _ts = _row[-1].strip()   # snapshot_time is always last
                 if not _ts:
                     continue
                 try:
                     _dt = datetime.fromisoformat(_ts)
                     if _dt >= live_cutoff:
+                        _shift = len(_row) - len(_hdr)   # 0 old rows, 1 new rows
+                        _tc_raw = _row[_tc_col + _shift] if _tc_col is not None else None
+                        _rh_raw = _row[_rh_col + _shift] if _rh_col is not None else None
                         live_ts.append(_dt.strftime('%Y-%m-%d %H:%M:%S'))
-                        live_temp_f.append(c_to_f(sf(_lr.get('temp_C'))))
-                        live_rh_vals.append(sf(_lr.get('RH_pct')))
+                        live_temp_f.append(c_to_f(sf(_tc_raw)))
+                        live_rh_vals.append(sf(_rh_raw))
                 except Exception:
                     pass
 
