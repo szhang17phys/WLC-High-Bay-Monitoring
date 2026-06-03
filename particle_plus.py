@@ -1206,7 +1206,7 @@ function filterAndRender() {{
   Plotly.react('chart-dist', DIST,
     Object.assign({{}}, DARK, {{
       showlegend: false, bargap: 0.3,
-      yaxis: Object.assign({{}}, DARK.yaxis, {{ title: 'Counts / m\u00b3', type: 'log', range: [-0.5, null] }}),
+      yaxis: Object.assign({{}}, DARK.yaxis, {{ title: 'Counts / m\u00b3', type: 'log', range: [-0.5, 3] }}),
       xaxis: Object.assign({{}}, DARK.xaxis, {{ title: 'Particle Size (\u03bcm)' }}),
     }}), {{responsive: true, displaylogo: false}});
 
