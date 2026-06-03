@@ -46,13 +46,28 @@ PARTICLE_HIGH_M3    = 100000  # counts/m³ at 0.3 µm - contamination event
 OFFLINE_ALERT_MIN   = 90      # minutes without a new record before alerting
 
 # Email settings
-SMTP_HOST       = 'smtp.gmail.com'
-SMTP_PORT       = 465                          # SSL port
-EMAIL_SENDER    = 'your.sender@gmail.com'      # Gmail address that sends alerts
-EMAIL_PASSWORD  = 'xxxx xxxx xxxx xxxx'        # Gmail app password (16 chars, spaces ok)
-EMAIL_RECIPIENTS = [
-    'your.name@yale.edu',                      # add more addresses as needed
-]
+SMTP_HOST = 'smtp.gmail.com'
+SMTP_PORT = 465   # SSL port
+
+# Credentials are loaded from alerts_secrets.py (gitignored, lives only on noether).
+# Copy alerts_secrets.example.py -> alerts_secrets.py and fill in your values.
+# If alerts_secrets.py is missing, falls back to environment variables:
+#   EMAIL_SENDER, EMAIL_PASSWORD, EMAIL_RECIPIENTS (comma-separated).
+try:
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+    from alerts_secrets import EMAIL_SENDER, EMAIL_PASSWORD, EMAIL_RECIPIENTS
+except ImportError:
+    import os as _os
+    EMAIL_SENDER     = _os.environ.get('EMAIL_SENDER', '')
+    EMAIL_PASSWORD   = _os.environ.get('EMAIL_PASSWORD', '')
+    _rcpt            = _os.environ.get('EMAIL_RECIPIENTS', '')
+    EMAIL_RECIPIENTS = [r.strip() for r in _rcpt.split(',') if r.strip()]
+    if not EMAIL_SENDER or not EMAIL_PASSWORD or not EMAIL_RECIPIENTS:
+        print("ERROR: Email credentials not configured.")
+        print("  Copy features/alerts/alerts_secrets.example.py to")
+        print("  features/alerts/alerts_secrets.py and fill in your Gmail details.")
+        raise SystemExit(1)
 
 ALERT_SUBJECT_PREFIX = '[WLC Clean Room]'
 

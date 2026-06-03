@@ -13,5 +13,8 @@ __pycache__/
 *.pyo
 .env
 
+# Secrets — credentials file, lives only on noether, never committed to GitHub
+features/alerts/alerts_secrets.py
+
 # macOS
 .DS_Store
