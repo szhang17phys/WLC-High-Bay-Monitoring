@@ -9,9 +9,10 @@ Run this script on a cron schedule (e.g., every 10 minutes):
     */10 * * * * python3 /home/rraut/particle_plus/features/alerts/alerts.py
 
 Alert conditions (all configurable below):
-    - Relative humidity < RH_LOW_PCT  (dry air risk)
-    - Relative humidity > RH_HIGH_PCT (condensation risk)
-    - Temperature > TEMP_HIGH_F       (thermal excursion)
+    - Relative humidity < RH_LOW_PCT   (default < 20%, dry air / static risk)
+    - Relative humidity > RH_HIGH_PCT  (default > 90%, condensation / moisture risk)
+    - Temperature < TEMP_LOW_F         (default < 33 degF, abnormal cold)
+    - Temperature > TEMP_HIGH_F        (default > 120 degF, thermal excursion)
     - Particle count (0.3 µm) > PARTICLE_HIGH_M3 (contamination event)
     - Counter offline for > OFFLINE_ALERT_MIN minutes
 
@@ -37,9 +38,10 @@ STATE_FILE  = f'{BASE_DIR}/data/alert_state.json'
 LOG_FILE    = f'{BASE_DIR}/alert_log.txt'
 
 # Alert thresholds
-RH_LOW_PCT          = 30.0    # % - dry air / static risk
-RH_HIGH_PCT         = 60.0    # % - condensation / mold risk
-TEMP_HIGH_F         = 80.0    # degF - thermal excursion
+RH_LOW_PCT          = 20.0    # % - dry air / electrostatic risk
+RH_HIGH_PCT         = 90.0    # % - condensation / moisture risk
+TEMP_LOW_F          = 33.0    # degF - abnormally cold / potential freeze risk
+TEMP_HIGH_F         = 120.0   # degF - thermal excursion
 PARTICLE_HIGH_M3    = 100000  # counts/m³ at 0.3 µm - contamination event
 OFFLINE_ALERT_MIN   = 90      # minutes without a new record before alerting
 
@@ -232,6 +234,29 @@ def check_alerts():
             log(f"RH high ({rh:.1f}%) but cooldown active for 'rh_high'")
     else:
         state.pop('rh_high', None)
+
+    # ── TEMP LOW ──────────────────────────────────────────────────────────────
+    if temp_f is not None and temp_f < TEMP_LOW_F:
+        key = 'temp_low'
+        if cooldown_expired(state, key):
+            body = (
+                f"ALERT: Low Temperature\n\n"
+                f"Current temp: {temp_f:.1f} degF ({temp_c:.1f} degC)\n"
+                f"Threshold:    < {TEMP_LOW_F:.0f} degF\n\n"
+                f"Abnormally low temperature may indicate HVAC failure or\n"
+                f"unintended cold exposure in the clean room. Verify environmental\n"
+                f"controls and check that heating is functioning correctly.\n\n"
+                f"Timestamp:    {now_str}\n"
+                f"Location:     WLC High Bay (Wright Lab, Yale University)\n"
+                f"Instrument:   Particles Plus Model 7301\n"
+            )
+            if send_email(f"LOW TEMPERATURE: {temp_f:.1f}F (threshold {TEMP_LOW_F:.0f}F)", body):
+                state[key] = datetime.now().isoformat()
+                fired = True
+        else:
+            log(f"Temp low ({temp_f:.1f}F) but cooldown active for 'temp_low'")
+    else:
+        state.pop('temp_low', None)
 
     # ── TEMP HIGH ─────────────────────────────────────────────────────────────
     if temp_f is not None and temp_f > TEMP_HIGH_F:

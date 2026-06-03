@@ -10,9 +10,10 @@ the core logger are needed.
 
 | Condition | Default threshold | Reason |
 |-----------|-------------------|--------|
-| RH too low | < 30% | Electrostatic discharge risk to detector components |
-| RH too high | > 60% | Condensation and particle adhesion risk |
-| Temperature high | > 80 degF | HVAC failure or thermal excursion |
+| RH too low | < 20% | Electrostatic discharge risk to detector components |
+| RH too high | > 90% | Condensation and moisture risk |
+| Temperature too low | < 33 degF | Abnormal cold, potential HVAC failure |
+| Temperature too high | > 120 degF | Thermal excursion, HVAC failure |
 | Particle count high | > 100,000 /m³ at 0.3 µm | Contamination event |
 | Counter offline | > 90 min since last record | Instrument or logger failure |
 
@@ -97,9 +98,10 @@ rm /home/rraut/particle_plus/data/alert_state.json
 All thresholds are in the configuration block at the top of `alerts.py`:
 
 ```python
-RH_LOW_PCT          = 30.0    # % RH lower limit
-RH_HIGH_PCT         = 60.0    # % RH upper limit
-TEMP_HIGH_F         = 80.0    # degF upper limit
+RH_LOW_PCT          = 20.0    # % RH lower limit
+RH_HIGH_PCT         = 90.0    # % RH upper limit
+TEMP_LOW_F          = 33.0    # degF lower limit
+TEMP_HIGH_F         = 120.0   # degF upper limit
 PARTICLE_HIGH_M3    = 100000  # counts/m³ at 0.3 µm
 OFFLINE_ALERT_MIN   = 90      # minutes before offline alert
 COOLDOWN_HOURS      = 2       # hours between repeat alerts per condition
