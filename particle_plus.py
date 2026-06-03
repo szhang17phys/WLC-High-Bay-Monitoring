@@ -36,14 +36,13 @@ PID_FILE     = f'{BASE_DIR}/particle_plus.pid'
 
 # sampling schedule
 SAMPLE_TIME_S       = 60      # 1 minute sample
-HOLD_TIME_S         = 60      # 1 min hold → 2 min total cycle (30/hr)
+HOLD_TIME_S         = 1800    # 30 min between samples = twice per hour
 DELAY_TIME_S        = 5       # pump stabilization
 CYCLES              = 1       # 1 sample per cycle then hold
 
 # sync/erase
-ERASE_AFTER_SYNC    = False   # legacy flag — use PURGE_AFTER_DAYS instead
+ERASE_AFTER_SYNC    = False   # set True after verifying data
 MIN_RECORDS_TO_SYNC = 1
-PURGE_AFTER_DAYS    = 3       # erase counter records older than this many days
 
 # github — repo root = BASE_DIR so index.html lands at root (GitHub Pages)
 GITHUB_REPO_DIR     = BASE_DIR
@@ -383,42 +382,6 @@ def erase_counter(client):
     return remaining == 0
 
 
-def purge_old_records(client):
-    """
-    Erase ALL counter records if the oldest synced record is older than
-    PURGE_AFTER_DAYS days.  Safe because all records are already in the
-    noether CSV before this is called.  After erasure the counter resets
-    its record-number sequence to 0; mode_sync detects this on the next
-    run and re-starts syncing from record 1.
-    """
-    cutoff = datetime.now() - timedelta(days=PURGE_AFTER_DAYS)
-    oldest_dt = None
-    if os.path.exists(OUTPUT_CSV):
-        with open(OUTPUT_CSV) as _f:
-            for _row in csv.DictReader(_f):
-                _d = (_row.get('date') or '').strip()
-                _t = (_row.get('time') or '').strip()
-                _ts = f'{_d} {_t}' if (_d and _t) else (_row.get('sync_time') or '').strip()
-                if not _ts:
-                    continue
-                try:
-                    _dt = datetime.fromisoformat(_ts.replace(' ', 'T'))
-                    if oldest_dt is None or _dt < oldest_dt:
-                        oldest_dt = _dt
-                except Exception:
-                    pass
-    if oldest_dt is None:
-        log("purge_old_records: no timestamped records found, skipping", 'WARN')
-        return
-    if oldest_dt < cutoff:
-        log(f"purge_old_records: oldest record {oldest_dt.strftime('%Y-%m-%d')} "
-            f"is >{PURGE_AFTER_DAYS} days old — erasing counter")
-        erase_counter(client)
-    else:
-        log(f"purge_old_records: oldest record {oldest_dt.strftime('%Y-%m-%d')} "
-            f"is within {PURGE_AFTER_DAYS}-day window, not erasing")
-
-
 # ─── GITHUB PAGES DASHBOARD ───────────────────────────────────────────────────
 
 def generate_dashboard_html(csv_path, output_path):
@@ -427,10 +390,6 @@ def generate_dashboard_html(csv_path, output_path):
     dashboard matching the dashboard.py visual design for GitHub Pages.
     """
     import json
-    import sys as _sys
-    _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                     'features', 'notification_center'))
-    from notification_center import build_notification_component
 
     # ── read CSV ──────────────────────────────────────────────────────────────
     rows = []
@@ -488,9 +447,7 @@ def generate_dashboard_html(csv_path, output_path):
         return None
 
     def c_to_f(c):
-        """Convert °C → °F. Returns None for None, zero, or implausible values
-        (device returns 0 when the sensor is not active)."""
-        return round(c * 9/5 + 32, 1) if (c is not None and c > 0) else None
+        return round(c * 9/5 + 32, 1) if c is not None else None
 
     # ── extract data ──────────────────────────────────────────────────────────
     def get_real_ts(r):
@@ -531,7 +488,7 @@ def generate_dashboard_html(csv_path, output_path):
 
     _BULK_THRESHOLD_S = 60   # <60 s gap between consecutive sync_times → bulk
 
-    # collect records sorted by record_number
+    # collect records; always parse raw sync_time separately for ordering/detection
     _all_ts = []
     for r in recent:
         ts = get_real_ts(r)
@@ -539,27 +496,39 @@ def generate_dashboard_html(csv_path, output_path):
             rec_num = int(float(r.get('record_number', 0) or 0))
         except (ValueError, TypeError):
             rec_num = 0
-        # parse datetime for gap detection
+        # device date/time for chart use
         _dt = None
         if ts:
             try:
                 _dt = datetime.fromisoformat(ts.replace(' ', 'T').split('+')[0])
             except Exception:
                 pass
-        _all_ts.append((rec_num, r, ts, _dt))
-    _all_ts.sort(key=lambda x: x[0])
+        # raw sync_time for ordering and bulk detection (always reliable)
+        _sync_dt = None
+        for _sk in ('sync_time', 'snapshot_time'):
+            _sv = (r.get(_sk) or '').strip()
+            if _sv:
+                try:
+                    _sync_dt = datetime.fromisoformat(_sv.replace(' ', 'T').split('+')[0])
+                    break
+                except Exception:
+                    pass
+        _all_ts.append((rec_num, r, ts, _dt, _sync_dt))
+    # Sort by sync_time so bulk-synced records stay adjacent regardless of rec_num
+    # (counter resets restart rec_num at 1, but sync_times are always monotonic)
+    _all_ts.sort(key=lambda x: (x[4] or datetime.min, x[0]))
 
-    # split into batches
+    # split into batches using sync_time gaps (not device date/time)
     _batches = []
     _cur = []
     for item in _all_ts:
         if not _cur:
             _cur.append(item)
         else:
-            _prev_dt = next((x[3] for x in reversed(_cur) if x[3] is not None), None)
-            _this_dt = item[3]
-            if (_prev_dt is not None and _this_dt is not None and
-                    (_this_dt - _prev_dt).total_seconds() <= _BULK_THRESHOLD_S):
+            _prev_sync = next((x[4] for x in reversed(_cur) if x[4] is not None), None)
+            _this_sync = item[4]
+            if (_prev_sync is not None and _this_sync is not None and
+                    (_this_sync - _prev_sync).total_seconds() <= _BULK_THRESHOLD_S):
                 _cur.append(item)          # same bulk batch
             else:
                 _batches.append(_cur)
@@ -576,7 +545,7 @@ def generate_dashboard_html(csv_path, output_path):
                   or datetime.now()
         if _n <= 2:
             # individual sync(s) — sync_time ≈ measurement time
-            for _rn, _r, _ts, _dt in _batch:
+            for _rn, _r, _ts, _dt, _sync in _batch:
                 timestamps.append(_anchor.strftime('%Y-%m-%d %H:%M:%S')
                                    if _dt is None else _dt.strftime('%Y-%m-%d %H:%M:%S'))
                 chart_records.append(_r)
@@ -589,6 +558,12 @@ def generate_dashboard_html(csv_path, output_path):
             ]
             timestamps.extend(_est_ts)
             chart_records.extend([x[1] for x in _batch])
+
+    # Final sort: ensure timestamps are strictly chronological for chart rendering
+    # (bulk-batch estimation can produce minor out-of-order artefacts)
+    if timestamps:
+        _sorted = sorted(zip(timestamps, chart_records), key=lambda x: x[0])
+        timestamps, chart_records = map(list, zip(*_sorted))
 
     # Step-hold: use real timestamps directly — with line.shape='hv' in Plotly,
     # each measured value is held horizontally until the next measurement arrives.
@@ -616,7 +591,7 @@ def generate_dashboard_html(csv_path, output_path):
     #    not in historical records — read LIVE_CSV for the env chart/cards ──────
     live_cutoff = datetime.now() - timedelta(hours=24)
     live_ts      = []
-    live_temp_c  = []   # raw °C values (None when sensor inactive/zero)
+    live_temp_f  = []
     live_rh_vals = []
     if os.path.exists(LIVE_CSV):
         with open(LIVE_CSV, 'r') as _lf:
@@ -628,29 +603,21 @@ def generate_dashboard_html(csv_path, output_path):
                     _dt = datetime.fromisoformat(_ts)
                     if _dt >= live_cutoff:
                         live_ts.append(_dt.strftime('%Y-%m-%d %H:%M:%S'))
-                        _tc = sf(_lr.get('temp_C'))
-                        # treat 0 as "no reading" — device returns 0 when sensor inactive
-                        live_temp_c.append(_tc if (_tc is not None and _tc > 0) else None)
+                        live_temp_f.append(c_to_f(sf(_lr.get('temp_C'))))
                         live_rh_vals.append(sf(_lr.get('RH_pct')))
                 except Exception:
                     pass
-    live_temp_f = [c_to_f(v) for v in live_temp_c]   # °F for chart
 
     # ── status strip ──────────────────────────────────────────────────────────
-    # Filter zero — device stores 0 when temp sensor not active (records 1-123)
     lv_temp_c = latest_val('temp_C')
-    if lv_temp_c is not None and lv_temp_c <= 0:
-        lv_temp_c = None
-    last_temp_c_str = f'{lv_temp_c:.1f}' if lv_temp_c is not None else '—'
-    last_temp_f     = f'{c_to_f(lv_temp_c):.1f}' if lv_temp_c is not None else '—'
+    last_temp_f = f'{c_to_f(lv_temp_c):.1f}' if lv_temp_c is not None else '—'
     lv_rh   = latest_val('RH_pct')
     last_rh = f'{lv_rh:.1f}'  if lv_rh  is not None else '—'
     # override env cards with latest live reading if available (live has real values)
-    if live_temp_c:
-        _ltc = next((v for v in reversed(live_temp_c) if v is not None), None)
-        if _ltc is not None:
-            last_temp_c_str = f'{_ltc:.1f}'
-            last_temp_f     = f'{c_to_f(_ltc):.1f}'
+    if live_temp_f:
+        _ltf = next((v for v in reversed(live_temp_f) if v is not None), None)
+        if _ltf is not None:
+            last_temp_f = f'{_ltf:.1f}'
     if live_rh_vals:
         _lrh = next((v for v in reversed(live_rh_vals) if v is not None), None)
         if _lrh is not None:
@@ -691,7 +658,7 @@ def generate_dashboard_html(csv_path, output_path):
         f'<span class="card-val" style="color:{c}">{val}</span>'
         f'<span class="card-unit">{unit}</span></div>'
         for (lab, val, unit), c in zip(
-            [('Temperature', f'{last_temp_c_str}\u00b0C&nbsp;/&nbsp;{last_temp_f}', '\u00b0F'),
+            [('Temperature', last_temp_f, '°F'),
              ('Humidity',    last_rh,     '%'),
              ('Flow Rate',   last_flow,   'CFM')],
             ['#ff6b6b', '#4ecdc4', '#45b7d1'])
@@ -799,83 +766,123 @@ def generate_dashboard_html(csv_path, output_path):
     else:
         _iso_color = '#f87171'
         _iso_label = 'ISO&nbsp;9'
-    # ISO 14644-1:2015 limits table (cumulative counts/m³ at each size channel)
-    # Row: (class, 0.3um, 0.5um, 1.0um, 5.0um)  None = not defined for that channel
-    _ISO_ROWS = [
-        (1,  None,           None,           None,          None),
-        (2,  10,             4,              None,          None),
-        (3,  102,            35,             8,             None),
-        (4,  1_020,          352,            83,            None),
-        (5,  10_200,         3_520,          832,           29),
-        (6,  102_000,        35_200,         8_320,         293),
-        (7,  None,           352_000,        83_200,        2_930),
-        (8,  None,           3_520_000,      832_000,       29_300),
-        (9,  None,           35_200_000,     8_320_000,     293_000),
-    ]
-    def _fmt_iso(v):
-        if v is None:
-            return '<span style="color:#374151">&mdash;</span>'
-        if v >= 1_000_000:
-            return f'{v/1_000_000:.1f}M'
-        if v >= 1_000:
-            return f'{v/1_000:.0f}k'
-        return str(v)
-    _iso_table_rows = ''
-    for _cls, *_vals in _ISO_ROWS:
-        _row_color = _iso_color if _cls == _iso_class else ''
-        _bg = 'background:#0f172a;' if _cls == _iso_class else ''
-        _fw = 'font-weight:bold;' if _cls == _iso_class else ''
-        _border = f'border:1px solid {_iso_color};border-radius:3px;' if _cls == _iso_class else ''
-        _cells = ''.join(
-            f'<td style="padding:3px 10px 3px 6px;text-align:right;'
-            f'color:{"#d1d5db" if _row_color else "#6b7280"}">{_fmt_iso(v)}</td>'
-            for v in _vals
-        )
-        _iso_table_rows += (
-            f'<tr style="{_bg}{_fw}{_border}">'
-            f'<td style="padding:3px 8px;color:{_row_color or "#9ca3af"};'
-            f'white-space:nowrap">ISO&nbsp;{_cls}</td>'
-            f'{_cells}</tr>\n'
-        )
-    _iso_dropdown_html = (
-        '<div class="iso-dropdown" id="iso-dropdown">'
-        '<div class="iso-drop-hdr">'
-        'ISO 14644-1:2015 &nbsp;&mdash;&nbsp; Max particle concentration (counts/m&sup3;)'
-        '</div>'
-        '<table style="border-collapse:collapse;width:100%;font-size:11.5px;">'
-        '<thead>'
-        '<tr style="color:#4b7ab8;font-size:9px;letter-spacing:1px;'
-        'text-transform:uppercase;border-bottom:1px solid #1e293b;">'
-        '<th style="padding:4px 8px 5px;text-align:left">Class</th>'
-        '<th style="padding:4px 10px 5px 6px;text-align:right">&ge;0.3&nbsp;&micro;m</th>'
-        '<th style="padding:4px 10px 5px 6px;text-align:right">&ge;0.5&nbsp;&micro;m</th>'
-        '<th style="padding:4px 10px 5px 6px;text-align:right">&ge;1.0&nbsp;&micro;m</th>'
-        '<th style="padding:4px 10px 5px 6px;text-align:right">&ge;5.0&nbsp;&micro;m</th>'
-        '</tr></thead>'
-        f'<tbody>{_iso_table_rows}</tbody>'
-        '</table>'
-        '<div style="font-size:9px;color:#4b5563;margin-top:7px;">'
-        'Current classification shown highlighted &nbsp;&bull;&nbsp; '
-        'Worst-case channel across latest sample'
-        '</div>'
-        '</div>'
-    )
     iso_badge_html = (
-        '<div class="iso-badge-wrap">'
-        f'<div class="iso-badge" '
-        f'style="color:{_iso_color};border-color:{_iso_color};cursor:pointer;user-select:none;" '
-        f'onclick="toggleIsoDropdown()" title="ISO 14644-1 class (click for limits table)">'
+        f'<div class="iso-badge" style="color:{_iso_color};border-color:{_iso_color};margin-left:14px;">'
         f'{_iso_label}</div>'
-        f'{_iso_dropdown_html}'
-        '</div>'
     )
 
     # ── notification center ────────────────────────────────────────────────────
+    # Thresholds mirror features/alerts/alerts.py defaults
+    _N_RH_LOW   = 20.0;  _N_RH_HIGH   = 90.0
+    _N_TF_LOW   = 33.0;  _N_TF_HIGH   = 120.0
+    _N_P_HIGH   = 100000
+
+    # Read alert state written by alerts.py (if it exists)
+    _alert_state = {}
     _alert_state_path = os.path.join(os.path.dirname(OUTPUT_CSV), 'alert_state.json')
-    _notif = build_notification_component(_latest_rec, _alert_state_path)
-    notif_badge_html = _notif['badge_html']
-    notif_css        = _notif['css']
-    notif_js         = _notif['js']
+    if os.path.exists(_alert_state_path):
+        try:
+            with open(_alert_state_path) as _af:
+                _alert_state = json.load(_af)
+        except Exception:
+            pass
+
+    _notif_rows = []
+
+    # 1. Last sample time
+    _last_ts_str = get_real_ts(_latest_rec) if _latest_rec else None
+    if _last_ts_str:
+        try:
+            _last_dt   = datetime.fromisoformat(_last_ts_str.replace(' ', 'T'))
+            _ago_s     = int((datetime.now() - _last_dt).total_seconds())
+            _ago_label = (f'{_ago_s // 60}\u00a0min ago' if _ago_s < 3600
+                          else f'{_ago_s // 3600}\u00a0hr ago' if _ago_s < 86400
+                          else f'{_ago_s // 86400}\u00a0day(s) ago')
+            _notif_rows.append(('info',
+                f'\u25cf\u00a0Last sample: {_last_ts_str}\u00a0({_ago_label})'))
+        except Exception:
+            _notif_rows.append(('info', f'\u25cf\u00a0Last sample: {_last_ts_str}'))
+    else:
+        _notif_rows.append(('warn', '\u25cf\u00a0Last sample: unknown'))
+
+    # 2. Relative humidity
+    _rh_now = sf(_latest_rec.get('RH_pct')) if _latest_rec else None
+    if _rh_now is not None:
+        if _rh_now < _N_RH_LOW:
+            _notif_rows.append(('alert',
+                f'\u25b2\u00a0RH\u00a0{_rh_now:.0f}% \u2014 below {_N_RH_LOW:.0f}% threshold (static risk)'))
+        elif _rh_now > _N_RH_HIGH:
+            _notif_rows.append(('alert',
+                f'\u25b2\u00a0RH\u00a0{_rh_now:.0f}% \u2014 above {_N_RH_HIGH:.0f}% threshold (condensation risk)'))
+        else:
+            _notif_rows.append(('ok',
+                f'\u25cf\u00a0RH\u00a0{_rh_now:.0f}% \u2014 nominal'))
+    else:
+        _notif_rows.append(('mute', '\u25cb\u00a0RH: no sensor data'))
+
+    # 3. Temperature
+    _tc_now = sf(_latest_rec.get('temp_C')) if _latest_rec else None
+    if _tc_now is not None and _tc_now > 0:
+        _tf_now = round(_tc_now * 9/5 + 32, 1)
+        if _tf_now < _N_TF_LOW:
+            _notif_rows.append(('alert',
+                f'\u25b2\u00a0Temp\u00a0{_tc_now:.1f}\u00b0C / {_tf_now:.0f}\u00b0F \u2014 below {_N_TF_LOW:.0f}\u00b0F threshold'))
+        elif _tf_now > _N_TF_HIGH:
+            _notif_rows.append(('alert',
+                f'\u25b2\u00a0Temp\u00a0{_tc_now:.1f}\u00b0C / {_tf_now:.0f}\u00b0F \u2014 above {_N_TF_HIGH:.0f}\u00b0F threshold'))
+        else:
+            _notif_rows.append(('ok',
+                f'\u25cf\u00a0Temp\u00a0{_tc_now:.1f}\u00b0C / {_tf_now:.0f}\u00b0F \u2014 nominal'))
+    else:
+        _notif_rows.append(('mute', '\u25cb\u00a0Temp: no sensor data'))
+
+    # 4. Particle concentration at 0.3 µm
+    _p_now = sf(_latest_rec.get('ch1_diff_m3')) if _latest_rec else None
+    if _p_now is not None:
+        if _p_now > _N_P_HIGH:
+            _notif_rows.append(('alert',
+                f'\u25b2\u00a00.3\u00b5m\u00a0{_p_now:,.0f}\u00a0/m\u00b3 \u2014 above contamination threshold'))
+        else:
+            _notif_rows.append(('ok',
+                f'\u25cf\u00a00.3\u00b5m\u00a0{_p_now:,.0f}\u00a0/m\u00b3 \u2014 within limit'))
+    else:
+        _notif_rows.append(('mute', '\u25cb\u00a00.3\u00b5m: no data'))
+
+    # 5. Recent emails from alert_state.json (sent within last 24 hr)
+    _alert_labels = {
+        'rh_low':          'Low humidity',
+        'rh_high':         'High humidity',
+        'temp_low':        'Low temperature',
+        'temp_high':       'High temperature',
+        'particle_high':   'High particle count',
+        'counter_offline': 'Counter offline',
+    }
+    _email_cutoff = datetime.now() - timedelta(hours=24)
+    _email_sent   = False
+    for _ak, _ats in _alert_state.items():
+        try:
+            _adt = datetime.fromisoformat(_ats)
+            if _adt >= _email_cutoff:
+                _notif_rows.append(('email',
+                    f'\u2709\u00a0Email sent: {_alert_labels.get(_ak, _ak)} '
+                    f'at\u00a0{_adt.strftime("%H:%M")}'))
+                _email_sent = True
+        except Exception:
+            pass
+    if not _email_sent:
+        _notif_rows.append(('mute', '\u25cb\u00a0No alerts emailed in last 24\u00a0hr'))
+
+    # Build HTML rows
+    _css_map = {'ok': 'ni-ok', 'warn': 'ni-warn', 'alert': 'ni-alert',
+                'email': 'ni-email', 'info': 'ni-info', 'mute': 'ni-mute'}
+    notif_panel_html = (
+        '<div class="notif-panel">'
+        '<div class="notif-hdr">\u2299\u00a0SYSTEM\u00a0STATUS</div>'
+        + ''.join(
+            f'<div class="notif-row {_css_map.get(s, "ni-mute")}">{msg}</div>'
+            for s, msg in _notif_rows)
+        + '</div>'
+    )
 
     # ── connection banner ─────────────────────────────────────────────────────
     if _counter_online:
@@ -982,24 +989,27 @@ def generate_dashboard_html(csv_path, output_path):
   .stat-v {{ color: #93c5fd; font-weight: bold; font-size: 12px; }}
   .stat-v.warn {{ color: #fbbf24; }}
   .stat-v.alert {{ color: #f87171; }}
-  /* ISO badge dropdown */
-  .iso-badge-wrap {{
-    position: relative; display: inline-block;
-  }}
-  .iso-dropdown {{
-    display: none; position: absolute; right: 0; top: calc(100% + 6px);
-    z-index: 200;
+  .notif-panel {{
+    display: flex; flex-direction: column; align-self: stretch;
+    min-width: 230px; max-width: 320px;
     background: #060d1a; border: 1px solid #1e3a5f;
-    border-radius: 6px; padding: 10px 14px 12px; min-width: 380px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+    border-radius: 6px; padding: 7px 12px 8px; gap: 3px;
   }}
-  .iso-dropdown.open {{ display: block; }}
-  .iso-drop-hdr {{
+  .notif-hdr {{
     color: #4b7ab8; font-size: 9px; text-transform: uppercase;
-    letter-spacing: 1.5px; padding-bottom: 6px;
-    border-bottom: 1px solid #1e293b; margin-bottom: 6px;
+    letter-spacing: 1.8px; padding-bottom: 5px;
+    border-bottom: 1px solid #1e293b; margin-bottom: 3px;
   }}
-{notif_css}
+  .notif-row {{
+    font-size: 10px; line-height: 1.45; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }}
+  .ni-ok    {{ color: #4ade80; }}
+  .ni-warn  {{ color: #fbbf24; }}
+  .ni-alert {{ color: #f87171; }}
+  .ni-email {{ color: #93c5fd; }}
+  .ni-info  {{ color: #d1d5db; }}
+  .ni-mute  {{ color: #4b5563; }}
 </style>
 </head>
 <body>
@@ -1028,10 +1038,8 @@ def generate_dashboard_html(csv_path, output_path):
   </div>
   <div class="updated">Last pushed: {updated}</div>
   <div style="flex:1"></div>
-  <div style="display:flex;align-items:flex-end;gap:10px;">
-    {notif_badge_html}
-    {iso_badge_html}
-  </div>
+  {notif_panel_html}
+  {iso_badge_html}
 </div>
 
 <div class="status-strip">{status_strip_html}</div>
@@ -1058,7 +1066,7 @@ def generate_dashboard_html(csv_path, output_path):
 <div class="row2">
   <div class="chart-panel">
     <div class="chart-title">Latest Particle Size Distribution &nbsp;(most recent sample)</div>
-    <div id="chart-dist" style="height:320px"></div>
+    <div id="chart-dist" style="height:280px"></div>
   </div>
   <div class="chart-panel">
     <div class="chart-title">Temperature &amp; Humidity Over Time</div>
@@ -1190,14 +1198,8 @@ function filterAndRender() {{
 
   Plotly.react('chart-dist', DIST,
     Object.assign({{}}, DARK, {{
-      showlegend: false, bargap: 0.12,
-      yaxis: Object.assign({{}}, DARK.yaxis, {{
-        title: 'Counts / m\u00b3', type: 'log',
-        range: [-1, 3],
-        dtick: 1,
-        tickvals: [0.1, 1, 10, 100, 1000],
-        ticktext: ['0.1', '1', '10', '100', '1\u200ak'],
-      }}),
+      showlegend: false, bargap: 0.3,
+      yaxis: Object.assign({{}}, DARK.yaxis, {{ title: 'Counts / m\u00b3', type: 'log', range: [-0.5, null] }}),
       xaxis: Object.assign({{}}, DARK.xaxis, {{ title: 'Particle Size (\u03bcm)' }}),
     }}), {{responsive: true, displaylogo: false}});
 
@@ -1216,31 +1218,17 @@ function filterAndRender() {{
   ], Object.assign({{}}, DARK, {{
     xaxis:  Object.assign({{}}, DARK.xaxis,  {{ title: '' }}),
     yaxis:  Object.assign({{}}, DARK.yaxis,  {{ title: 'Temperature (\u00b0F)' }}),
-    yaxis2: {{ title: {{ text: 'Humidity (%)', standoff: 8 }},
+    yaxis2: {{ title: 'Humidity (%)',
                overlaying: 'y', side: 'right',
                gridcolor: '#1e293b', linecolor: '#334155',
                tickfont: {{ color: '#6b7280', size: 10 }},
                title_font: {{ color: '#6b7280', size: 11 }} }},
-    margin: {{ l: 60, r: 65, t: 30, b: 50 }},
   }}), {{responsive: true, displaylogo: false}});
 
   updateStats(i);
 }}
 
 filterAndRender();
-
-{notif_js}
-function toggleIsoDropdown() {{
-  var d = document.getElementById('iso-dropdown');
-  if (d) d.classList.toggle('open');
-}}
-document.addEventListener('click', function(e) {{
-  var wrap = document.querySelector('.iso-badge-wrap');
-  if (wrap && !wrap.contains(e.target)) {{
-    var d = document.getElementById('iso-dropdown');
-    if (d) d.classList.remove('open');
-  }}
-}});
 </script>
 </body>
 </html>"""
@@ -1390,13 +1378,6 @@ def mode_sync(client=None):
                     except (ValueError, TypeError):
                         pass
 
-        # Detect counter erasure: if total < last_saved the device was cleared
-        # and its record sequence reset to 0.  Restart sync from record 1.
-        if last_saved > 0 and total < last_saved:
-            log(f"Counter was erased/reset (total={total} < last_saved={last_saved}). "
-                f"Syncing all records from 1.")
-            last_saved = 0
-
         if last_saved >= total:
             log(f"Already up to date (saved up to record {last_saved}, counter has {total})")
             return True
@@ -1436,11 +1417,11 @@ def mode_sync(client=None):
         saved = save_to_csv(records, OUTPUT_CSV)
 
         if failed:
-            log(f"WARNING: {len(failed)} failed — NOT purging counter", 'WARN')
+            log(f"WARNING: {len(failed)} failed — NOT erasing", 'WARN')
             return False
 
-        if saved:
-            purge_old_records(client)
+        if ERASE_AFTER_SYNC and saved:
+            erase_counter(client)
 
         return True
 
