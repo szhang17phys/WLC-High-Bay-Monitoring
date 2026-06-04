@@ -4,6 +4,12 @@
 /particle_data_live.csv
 /sync_log.txt
 
+# Permanent archive — all particle measurements, local only (never pushed to GitHub)
+data/measurement_archive.csv
+
+# Sync state tracker — local only
+data/counter_state.json
+
 # Old dashboard subdirectory (now generated at repo root instead)
 dashboard/
 

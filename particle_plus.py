@@ -26,13 +26,15 @@ from pymodbus.client import ModbusTcpClient
 COUNTER_IP   = '10.66.66.68'
 PORT         = 502
 
-BASE_DIR     = '/home/rraut/particle_plus'   # git repo root on noether
-DATA_DIR     = f'{BASE_DIR}/data'
-OUTPUT_CSV   = f'{DATA_DIR}/measurements.csv'
-LIVE_CSV     = f'{DATA_DIR}/live.csv'
-SESSION_FILE = f'{DATA_DIR}/session_baseline.txt'
-LOG_FILE     = f'{BASE_DIR}/sync_log.txt'
-PID_FILE     = f'{BASE_DIR}/particle_plus.pid'
+BASE_DIR         = '/home/rraut/particle_plus'   # git repo root on noether
+DATA_DIR         = f'{BASE_DIR}/data'
+ARCHIVE_CSV      = f'{DATA_DIR}/measurement_archive.csv'  # all data, local only
+LIVE_CSV         = f'{DATA_DIR}/live.csv'                 # 30-day particle window, GitHub
+ENV_SNAPSHOT_CSV = f'{DATA_DIR}/env_live.csv'             # 10s env snapshots, GitHub
+COUNTER_STATE    = f'{DATA_DIR}/counter_state.json'       # tracks last synced record
+SESSION_FILE     = f'{DATA_DIR}/session_baseline.txt'
+LOG_FILE         = f'{BASE_DIR}/sync_log.txt'
+PID_FILE         = f'{BASE_DIR}/particle_plus.pid'
 
 # sampling schedule
 SAMPLE_TIME_S       = 60      # 1 minute sample
@@ -380,6 +382,10 @@ def erase_counter(client):
     time.sleep(3)
     remaining = get_record_count(client)
     log(f"Records remaining: {remaining}")
+    if remaining == 0:
+        from features.data_manager import reset_sync_state
+        reset_sync_state(COUNTER_STATE)
+        log("Sync state reset to 0 after erase")
     return remaining == 0
 
 
@@ -387,7 +393,7 @@ def erase_counter(client):
 
 def generate_dashboard_html(csv_path, output_path):
     """
-    Read last 7 days of CSV data and generate a self-contained static HTML
+    Read last 30 days of CSV data and generate a self-contained static HTML
     dashboard matching the dashboard.py visual design for GitHub Pages.
     """
     import json
@@ -399,8 +405,8 @@ def generate_dashboard_html(csv_path, output_path):
             reader = csv.DictReader(f)
             rows = list(reader)
 
-    # filter last 7 days — try counter date/time, then sync_time/snapshot_time fallback
-    cutoff = datetime.now() - timedelta(days=7)
+    # filter last 30 days — live.csv is already trimmed; this catches edge cases
+    cutoff = datetime.now() - timedelta(days=30)
     recent = []
     for row in rows:
         dt = None
@@ -424,7 +430,7 @@ def generate_dashboard_html(csv_path, output_path):
         if dt is None or dt >= cutoff:
             recent.append(row)
 
-    log(f"Dashboard: {len(recent)} records in last 7 days (cutoff: {cutoff.strftime('%Y-%m-%d %H:%M:%S')})")
+    log(f"Dashboard: {len(recent)} records in last 30 days (cutoff: {cutoff.strftime('%Y-%m-%d %H:%M:%S')})")
 
     # ── helpers ───────────────────────────────────────────────────────────────
     def sf(val):
@@ -576,14 +582,14 @@ def generate_dashboard_html(csv_path, output_path):
                      for r in _plot_records] for i in range(1, 7)}
     flow_vals = [sf(r.get('flow_CFM')) if r is not None else None for r in _plot_records]
 
-    # ── live CSV: counter only stores temp/RH in the live reading (record 0),
-    #    not in historical records — read LIVE_CSV for the env chart/cards ──────
+    # ── env snapshot CSV: counter only stores temp/RH in the live reading (record 0),
+    #    not in historical records — read ENV_SNAPSHOT_CSV for the env chart/cards ──
     live_cutoff = datetime.now() - timedelta(hours=24)
     live_ts      = []
     live_temp_f  = []
     live_rh_vals = []
-    if os.path.exists(LIVE_CSV):
-        with open(LIVE_CSV, 'r') as _lf:
+    if os.path.exists(ENV_SNAPSHOT_CSV):
+        with open(ENV_SNAPSHOT_CSV, 'r') as _lf:
             _raw = csv.reader(_lf)
             _hdr = next(_raw, [])
             # snapshot_time is always the last column regardless of row width.
@@ -790,7 +796,7 @@ def generate_dashboard_html(csv_path, output_path):
 
     # Read alert state written by alerts.py (if it exists)
     _alert_state = {}
-    _alert_state_path = os.path.join(os.path.dirname(OUTPUT_CSV), 'alert_state.json')
+    _alert_state_path = os.path.join(DATA_DIR, 'alert_state.json')
     if os.path.exists(_alert_state_path):
         try:
             with open(_alert_state_path) as _af:
@@ -1092,7 +1098,7 @@ def generate_dashboard_html(csv_path, output_path):
   <div class="ctrl-group">
     <label>Time Range</label>
     <select id="sel-range" onchange="filterAndRender()">
-      <option value="0">All data (7 days)</option>
+      <option value="0">All data (30 days)</option>
       <option value="30">Last 30 min</option>
       <option value="60">Last 1 hr</option>
       <option value="120">Last 2 hr</option>
@@ -1101,6 +1107,7 @@ def generate_dashboard_html(csv_path, output_path):
       <option value="720">Last 12 hr</option>
       <option value="1440" selected>Last 24 hr</option>
       <option value="2880">Last 2 days</option>
+      <option value="10080">Last 7 days</option>
     </select>
   </div>
   <div class="updated">Last pushed: {updated}</div>
@@ -1325,7 +1332,7 @@ def push_to_github(repo_dir, csv_path):
     import shutil
 
     html_path = os.path.join(repo_dir, 'index.html')
-    csv_dest  = os.path.join(repo_dir, 'data', 'measurements.csv')
+    csv_dest  = os.path.join(repo_dir, 'data', 'live.csv')
 
     os.makedirs(os.path.join(repo_dir, 'data'), exist_ok=True)
 
@@ -1442,24 +1449,39 @@ def mode_sync(client=None):
         total = get_record_count(client)
         log(f"Records on counter: {total}")
 
-        # find the highest record_number already saved so we only pull NEW records
-        last_saved = 0
-        if os.path.exists(OUTPUT_CSV):
-            with open(OUTPUT_CSV, 'r') as f:
-                for row in csv.DictReader(f):
-                    try:
-                        n = int(float(row.get('record_number', 0) or 0))
-                        if n > last_saved:
-                            last_saved = n
-                    except (ValueError, TypeError):
-                        pass
+        # ── determine last synced record ──────────────────────────────────────
+        # Prefer counter_state.json (written after every sync + after every erase).
+        # Fall back to scanning the archive CSV only on first run before state file exists.
+        from features.data_manager import (get_last_synced, set_last_synced,
+                                            rebuild_live_csv)
+        if os.path.exists(COUNTER_STATE):
+            last_saved = get_last_synced(COUNTER_STATE)
+        else:
+            last_saved = 0
+            if os.path.exists(ARCHIVE_CSV):
+                with open(ARCHIVE_CSV, 'r') as f:
+                    for row in csv.DictReader(f):
+                        try:
+                            n = int(float(row.get('record_number', 0) or 0))
+                            if n > last_saved:
+                                last_saved = n
+                        except (ValueError, TypeError):
+                            pass
+
+        # ── detect counter erase / reset ─────────────────────────────────────
+        # If the counter has fewer records than our last synced number, the counter
+        # was erased and its record numbers restarted from 1.  Reset to sync from 1.
+        if last_saved > total:
+            log(f"Counter reset detected: last_synced={last_saved} but counter_total={total}. "
+                f"Restarting sync from record 1.", 'WARN')
+            last_saved = 0
 
         if last_saved >= total:
-            log(f"Already up to date (saved up to record {last_saved}, counter has {total})")
+            log(f"Already up to date (synced to record {last_saved}, counter has {total})")
             return True
 
-        start    = last_saved + 1
-        n_new    = total - last_saved
+        start = last_saved + 1
+        n_new = total - last_saved
         log(f"New records to sync: {n_new}  (records {start}–{total})")
 
         if n_new < MIN_RECORDS_TO_SYNC:
@@ -1490,12 +1512,20 @@ def mode_sync(client=None):
                 log(f"  [{i:4d}/{total}] Error: {e}", 'ERROR')
                 failed.append(i)
 
-        saved = save_to_csv(records, OUTPUT_CSV)
+        # ── save to archive (never trimmed) ──────────────────────────────────
+        saved = save_to_csv(records, ARCHIVE_CSV)
 
         if failed:
             log(f"WARNING: {len(failed)} failed — NOT erasing", 'WARN')
             return False
 
+        # ── update sync state and rebuild 30-day live.csv ────────────────────
+        if saved:
+            set_last_synced(COUNTER_STATE, total)
+            n_live = rebuild_live_csv(ARCHIVE_CSV, LIVE_CSV)
+            log(f"live.csv rebuilt: {n_live} records (last 30 days)")
+
+        # ── erase counter if needed ───────────────────────────────────────────
         if saved and (ERASE_AFTER_SYNC or total > TRIM_CAP):
             if total > TRIM_CAP:
                 log(f"Counter at {total} records (>{TRIM_CAP}) — auto-erasing to free storage")
@@ -1510,12 +1540,16 @@ def mode_sync(client=None):
 
 def mode_live():
     """
-    Continuously snapshot live (in-progress) data to LIVE_CSV.
-    Useful for watching what the counter is currently seeing.
+    Continuously snapshot live (in-progress) data to ENV_SNAPSHOT_CSV.
+    Useful for watching what the counter is currently seeing (temp/RH).
+    Trims the snapshot file to the last 30 days every 6 hours.
     """
     log("MODE: --live  (streaming live snapshots every 10s)")
-    log(f"  Output: {LIVE_CSV}")
+    log(f"  Output: {ENV_SNAPSHOT_CSV}")
     log("  Ctrl+C to stop")
+
+    from features.data_manager import trim_env_csv
+    _last_trim = time.time()
 
     while True:
         # skip this cycle if the sample thread is using the counter
@@ -1530,7 +1564,7 @@ def mode_live():
             try:
                 data = read_live_snapshot(client)
                 if data:
-                    save_to_csv([data], LIVE_CSV)
+                    save_to_csv([data], ENV_SNAPSHOT_CSV)
                     log(f"Live: "
                         f"Date: {data.get('date','') or '(empty)'}  "
                         f"Time: {data.get('time','') or '(empty)'}  "
@@ -1544,21 +1578,28 @@ def mode_live():
                 client.close()
         finally:
             _modbus_lock.release()
+
+        # trim env snapshots to 30 days every 6 hours
+        if time.time() - _last_trim > 21600:
+            n_kept = trim_env_csv(ENV_SNAPSHOT_CSV)
+            log(f"Trimmed env_live.csv to 30 days: {n_kept} rows kept")
+            _last_trim = time.time()
+
         time.sleep(10)
 
 
 def mode_trim():
-    """Flush new records to CSV then erase counter if above TRIM_CAP."""
+    """Flush new records to archive then erase counter if above TRIM_CAP."""
     log(f"MODE: --trim  (cap={TRIM_CAP})")
     import trim_counter as _tc
-    _tc.OUTPUT_CSV = OUTPUT_CSV   # use same archive path as particle_plus
+    _tc.OUTPUT_CSV = ARCHIVE_CSV   # flush to the permanent archive
     return _tc.trim_if_full(cap=TRIM_CAP)
 
 
 def mode_dashboard():
     """Generate HTML and push to GitHub Pages"""
     log("MODE: --dashboard")
-    push_to_github(GITHUB_REPO_DIR, OUTPUT_CSV)
+    push_to_github(GITHUB_REPO_DIR, LIVE_CSV)
 
 
 def mode_all():
@@ -1567,8 +1608,19 @@ def mode_all():
     Recommended for the tmux session on noether.
     """
     import threading
+    from features.data_manager import migrate_old_files, rebuild_live_csv, trim_env_csv
 
     log("MODE: --all  (sample + live + dashboard)")
+
+    # ── one-time migration from legacy file names ─────────────────────────────
+    migrate_old_files(DATA_DIR)
+    log("Data file migration check complete")
+
+    # ── rebuild live.csv from archive at startup ──────────────────────────────
+    if os.path.exists(ARCHIVE_CSV):
+        n_live = rebuild_live_csv(ARCHIVE_CSV, LIVE_CSV)
+        log(f"Startup: live.csv rebuilt with {n_live} records (last 30 days)")
+    trim_env_csv(ENV_SNAPSHOT_CSV)
 
     # write PID so --stop can find and signal this process
     with open(PID_FILE, 'w') as _pf:
