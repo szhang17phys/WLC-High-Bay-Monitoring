@@ -4,32 +4,67 @@
 // Embedded verbatim by particle_plus.py::generate_dashboard_html() immediately
 // after the data-constants block (TS, COUNTS, PM, DIST, LIVE_TS, etc.).
 //
-// Key fixes vs. the original inline JS:
-//   1. Y axis on particle-count chart is FIXED (autorange: false, fixedrange: true)
-//      so ISO reference lines always stay visible and the chart never disappears
-//      when the time-range dropdown changes.
-//   2. +/- modebar buttons and scroll-zoom only affect the X (time) axis because
-//      yaxis.fixedrange: true prevents them from rescaling Y.
-//   3. PM chart Y is anchored at zero (rangemode: 'tozero') with a stable max
-//      computed from the full dataset at page load.
-//   4. scrollZoom: true added to PLOTLY_CFG so trackpad / mouse-wheel zooms
-//      the time axis smoothly.
+// Fixes in this file:
+//   1. All particle & env Y axes are stable — pre-computed from the full
+//      dataset so they never jump when the time-range dropdown or zoom changes.
+//   2. fixedrange: true on every Y axis → +/- and scroll-zoom only affect X.
+//   3. scrollZoom: true so trackpad / mouse-wheel zooms the time axis.
+//   4. Zoom-out expansion: when the user zooms/scrolls past the left edge of
+//      the current time window, the dropdown steps up automatically and the
+//      chart reloads with more data.  Two intermediate steps (2 days, 3 days)
+//      are inserted into the dropdown so expansion is gradual.
+
+// ── Ensure dropdown has intermediate expansion steps ──────────────────────────
+// Adds "Last 2 days" and "Last 3 days" between the existing 24 hr and 7 days
+// options so zoom-out expansion is gradual.  Done in JS so particle_plus.py
+// does not need to change.
+(function () {
+  const sel = document.getElementById('sel-range');
+  const existing = new Set(Array.from(sel.options).map(o => parseInt(o.value)));
+  const extra = [
+    { value: 2880,  label: 'Last 2 days' },
+    { value: 4320,  label: 'Last 3 days' },
+  ];
+  extra.forEach(({ value, label }) => {
+    if (existing.has(value)) return;
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = label;
+    // Insert in ascending order
+    let before = null;
+    for (let i = 0; i < sel.options.length; i++) {
+      if (parseInt(sel.options[i].value) > value) { before = sel.options[i]; break; }
+    }
+    sel.add(opt, before);
+  });
+})();
 
 // ── Stable Y ranges — computed ONCE from the full dataset at page load ────────
-// Using all data (not the current time slice) means the range never jumps when
-// the dropdown changes or filterAndRender() is called again.
+// Using all data (not the current time slice) means Y never jumps when the
+// dropdown changes or filterAndRender() is called again.
 
 // Particle counts (log scale).
-// Floor: COUNTS_Y_MAX >= 8.0 ensures ISO 5-9 reference lines (3520–35.2M/m³)
-// are always in view.  Ceiling expands automatically if the data exceeds 10^8.
+// Ceiling >= 8.0 keeps ISO 5–9 reference lines (3 520 – 35.2 M /m³) in view.
 const _allCountVals = COUNTS.flatMap(tr => tr.y).filter(v => v !== null && v > 0);
 const _rawCountMax  = _allCountVals.length ? Math.max(..._allCountVals) : 1e6;
 const COUNTS_Y_RANGE = [1.5, Math.max(Math.log10(_rawCountMax) + 0.5, 8.0)];
 
-// PM mass (linear scale).  20 % headroom above the dataset max; floor at 5 µg/m³.
+// PM mass (linear scale).  20 % headroom; floor at 5 µg/m³.
 const _allPMVals = PM.flatMap(tr => tr.y).filter(v => v !== null && v >= 0);
 const _rawPMMax  = _allPMVals.length ? Math.max(..._allPMVals) : 10;
 const PM_Y_MAX   = Math.max(_rawPMMax * 1.2, 5);
+
+// Temperature (°F).  ±5 °F padding around observed range; floor at 32 °F.
+const _tempVals  = TEMP_F.filter(v => v !== null && !isNaN(v));
+const TEMP_Y_RANGE = _tempVals.length
+  ? [Math.max(32,  Math.min(..._tempVals) - 5), Math.max(..._tempVals) + 5]
+  : [60, 90];
+
+// Relative humidity (%).  ±5 % padding; clamped to [0, 100].
+const _rhVals   = RH_VALS.filter(v => v !== null && !isNaN(v));
+const RH_Y_RANGE = _rhVals.length
+  ? [Math.max(0,   Math.min(..._rhVals) - 5), Math.min(100, Math.max(..._rhVals) + 5)]
+  : [0, 100];
 
 // ── Layout base shared by all charts ─────────────────────────────────────────
 const DARK = {
@@ -50,14 +85,11 @@ const DARK = {
 };
 
 // ── Plotly config shared across all charts ────────────────────────────────────
-// scrollZoom: true  lets the user zoom in/out on the time axis with the
-//             trackpad or mouse wheel without touching the toolbar.
-// select2d / lasso2d are removed — they are not useful on time-series data.
 const PLOTLY_CFG = {
-  responsive:              true,
-  displaylogo:             false,
-  scrollZoom:              true,
-  modeBarButtonsToRemove:  ['select2d', 'lasso2d'],
+  responsive:             true,
+  displaylogo:            false,
+  scrollZoom:             true,
+  modeBarButtonsToRemove: ['select2d', 'lasso2d'],
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -75,10 +107,8 @@ function sliceTraces(traces, i) {
   }));
 }
 
-// Returns vrect shapes for gaps > GAP_THRESH_MS in a timestamp array.
-// Rendered as subtle grey bands indicating the counter was offline.
 function gapShapes(ts) {
-  const GAP_THRESH_MS = 90 * 60 * 1000;   // 90 minutes
+  const GAP_THRESH_MS = 90 * 60 * 1000;
   const shapes = [];
   for (let k = 1; k < ts.length; k++) {
     if (new Date(ts[k]) - new Date(ts[k - 1]) > GAP_THRESH_MS) {
@@ -92,7 +122,6 @@ function gapShapes(ts) {
   return shapes;
 }
 
-// ISO 14644-1 reference lines (horizontal dashed) for the 0.5 µm channel.
 function isoShapes() {
   return ISO_LINES.map(l => ({
     type: 'line', xref: 'paper', x0: 0, x1: 1,
@@ -115,13 +144,12 @@ function updateStats(i) {
   const ch2   = COUNTS[1].y.slice(i).filter(v => v !== null && v !== undefined);
   const n     = ts.length;
   const fmt   = v => (v !== null && !isNaN(v))
-    ? Math.round(v).toLocaleString() + ' /m³' : '--';
+    ? Math.round(v).toLocaleString() + ' /m³' : '--';
   const mean1 = ch1.length ? ch1.reduce((a, b) => a + b, 0) / ch1.length : null;
   const peak1 = ch1.length ? Math.max(...ch1) : null;
   const exc7  = ch2.filter(v => v > 352000).length;
   const exc7s = ch2.length
-    ? exc7 + ' / ' + ch2.length + ' ('
-      + (exc7 / ch2.length * 100).toFixed(0) + '%)'
+    ? exc7 + ' / ' + ch2.length + ' (' + (exc7 / ch2.length * 100).toFixed(0) + '%)'
     : '--';
   const gaps = gapShapes(ts).length;
 
@@ -145,13 +173,9 @@ function filterAndRender() {
   const ts   = TS.slice(i);
   const gaps = gapShapes(ts);
 
-  // ── Particle count chart (log scale) ──────────────────────────────────────
-  // fixedrange: true on Y  →  +/- modebar buttons, scroll-zoom, and box-zoom
-  //   only move/scale the X (time) axis.  Y stays pinned to COUNTS_Y_RANGE so
-  //   all ISO reference lines remain visible regardless of which time window is
-  //   selected or how far the user zooms in on the time axis.
-  // autorange: false + range  →  Y never re-scales when filterAndRender() fires
-  //   (e.g. dropdown change), so the chart never "disappears" into a tiny range.
+  // ── Particle count chart (log scale) ─────────────────────────────────────
+  // yaxis.fixedrange: true  →  +/- and scroll-zoom only move the X (time) axis.
+  // autorange: false + COUNTS_Y_RANGE  →  Y never jumps on dropdown changes.
   Plotly.react('chart-counts', sliceTraces(COUNTS, i),
     Object.assign({}, DARK, {
       yaxis: Object.assign({}, DARK.yaxis, {
@@ -167,10 +191,7 @@ function filterAndRender() {
       annotations: isoAnnotations(),
     }), PLOTLY_CFG);
 
-  // ── PM mass chart (linear scale) ──────────────────────────────────────────
-  // fixedrange: true prevents Y from zooming so the chart stays readable.
-  // rangemode: 'tozero' + fixed range keeps the baseline at 0 across all
-  // time-window selections and prevents the axis from inverting or collapsing.
+  // ── PM mass chart (linear scale) ─────────────────────────────────────────
   Plotly.react('chart-pm', sliceTraces(PM, i),
     Object.assign({}, DARK, {
       yaxis: Object.assign({}, DARK.yaxis, {
@@ -185,8 +206,6 @@ function filterAndRender() {
     }), PLOTLY_CFG);
 
   // ── Size distribution bar chart ───────────────────────────────────────────
-  // Y is fixed to the data max (computed from latest snapshot, not time slice).
-  // Both axes are fixedrange so the bar chart is not accidentally panned.
   const _distMax    = (DIST[0] && DIST[0].y.length) ? Math.max(...DIST[0].y) : 100;
   const _distLogMax = Math.log10(Math.max(_distMax, 1)) + 0.3;
   Plotly.react('chart-dist', DIST,
@@ -207,9 +226,10 @@ function filterAndRender() {
     }), PLOTLY_CFG);
 
   // ── Environment chart (temperature + humidity) ────────────────────────────
-  // Y axes are NOT fixedrange here — temp and RH benefit from autorange because
-  // their absolute values are meaningful and vary within a known human-comfort
-  // range.  The user can zoom/pan to inspect fine fluctuations.
+  // TEMP_Y_RANGE / RH_Y_RANGE are computed from the full dataset at page load,
+  // so neither axis jumps when the time window or zoom changes.
+  // fixedrange: true on both Y axes — +/- and scroll only move the X axis,
+  // keeping the temp and RH scales stable for comparison across sessions.
   const livei = (LIVE_TS.length === 0 || !mins) ? 0 : (() => {
     const cut = new Date(new Date(LIVE_TS[LIVE_TS.length - 1]) - mins * 60000);
     const j   = LIVE_TS.findIndex(t => new Date(t) >= cut);
@@ -225,10 +245,18 @@ function filterAndRender() {
   ], Object.assign({}, DARK, {
     margin: { l: 60, r: 70, t: 30, b: 50 },
     xaxis:  Object.assign({}, DARK.xaxis, { title: '' }),
-    yaxis:  Object.assign({}, DARK.yaxis, { title: 'Temperature (°F)' }),
+    yaxis:  Object.assign({}, DARK.yaxis, {
+      title:      'Temperature (°F)',
+      autorange:  false,
+      range:      TEMP_Y_RANGE,
+      fixedrange: true,
+    }),
     yaxis2: {
       title:      { text: 'Humidity (%)', standoff: 15 },
       overlaying: 'y', side: 'right',
+      autorange:  false,
+      range:      RH_Y_RANGE,
+      fixedrange: true,
       gridcolor:  '#1e293b', linecolor: '#334155',
       tickfont:   { color: '#6b7280', size: 10 },
       title_font: { color: '#6b7280', size: 11 },
@@ -238,11 +266,57 @@ function filterAndRender() {
   updateStats(i);
 }
 
-// Initial render
-filterAndRender();
+// ── Zoom-out expansion ────────────────────────────────────────────────────────
+// When the user zooms or scrolls out past the left edge of the current time
+// window (X axis start moves before the earliest loaded data point), the
+// dropdown automatically steps to the next larger option and filterAndRender()
+// reloads the chart with more data.
+//
+// Guard flag prevents re-entrant calls in case Plotly.react() inside
+// filterAndRender() emits a spurious relayout event.
+(function () {
+  let _expanding = false;
 
-// Close notification dropdown when clicking outside it
-document.addEventListener('click', function(e) {
+  function tryExpandTimeRange(xRangeStart) {
+    if (_expanding) return;
+    if (!TS.length) return;
+
+    const sel      = document.getElementById('sel-range');
+    const mins     = parseInt(sel.value);
+    const dataEnd  = new Date(TS[TS.length - 1]);
+    const dataStart = new Date(dataEnd.getTime() - mins * 60 * 1000);
+
+    // Only expand when the panned/zoomed X start is before the data window start
+    if (new Date(xRangeStart) < dataStart && sel.selectedIndex < sel.options.length - 1) {
+      _expanding = true;
+      sel.selectedIndex++;
+      filterAndRender();
+      _expanding = false;
+    }
+  }
+
+  // Attach AFTER the initial filterAndRender() so the Plotly div exists.
+  // Plotly.react() preserves event listeners on the same div element, so
+  // this only needs to run once.
+  function attachListener() {
+    document.getElementById('chart-counts').on('plotly_relayout', function (ev) {
+      // Only care about explicit X range changes, not autorange resets.
+      const x0 = ev['xaxis.range[0]'];
+      if (x0 !== undefined) tryExpandTimeRange(x0);
+    });
+  }
+
+  // Exposed so the initial-render block below can call it.
+  window._attachZoomExpansion = attachListener;
+})();
+
+// ── Initial render ────────────────────────────────────────────────────────────
+filterAndRender();
+// Attach zoom-expansion listener now that chart-counts div is initialised.
+window._attachZoomExpansion();
+
+// ── Close notification dropdown on outside click ──────────────────────────────
+document.addEventListener('click', function (e) {
   var drop = document.getElementById('notif-drop');
   if (drop && drop.classList.contains('open') && !drop.parentElement.contains(e.target)) {
     drop.classList.remove('open');
