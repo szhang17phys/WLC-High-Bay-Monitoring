@@ -285,54 +285,83 @@ function filterAndRender() {
   updateStats(i);
 }
 
-// ── Zoom-out expansion ────────────────────────────────────────────────────────
-// When the user zooms or scrolls out past the left edge of the current time
-// window (X axis start moves before the earliest loaded data point), the
-// dropdown automatically steps to the next larger option and filterAndRender()
-// reloads the chart with more data.
+// ── Zoom behaviour: expansion, left/right hard stops, zoom-in limit ───────────
 //
-// Guard flag prevents re-entrant calls in case Plotly.react() inside
-// filterAndRender() emits a spurious relayout event.
-(function () {
-  let _expanding = false;
+// Three rules enforced on every time-series chart (counts, PM, env):
+//
+//   Zoom-out expansion  When X left edge crosses the data-window start,
+//                       step the dropdown to the next larger option and
+//                       reload all charts via filterAndRender().
+//
+//   Left hard stop      At the 7-day max dropdown, minallowed in the layout
+//                       tells Plotly to refuse any move past the data start —
+//                       no listener needed for that case.
+//
+//   Right hard stop     maxallowed is always set to the latest sample in
+//                       the layout, so no chart can pan into the future.
+//
+//   Zoom-in limit       If the visible span shrinks below MIN_SPAN_MS
+//                       (30 min ≈ 10–12 clicks from the default 24 h view),
+//                       snap the axis back to MIN_SPAN_MS centred on the
+//                       current midpoint.  Uses requestAnimationFrame so the
+//                       correction fires in the next frame — avoids
+//                       synchronous re-entrancy inside plotly_relayout.
+//
+// A single shared flag (_zooming) makes expansion and span-clamping mutually
+// exclusive and prevents stacking.
+//
+// Listeners are attached once after the initial render.  Plotly.react()
+// preserves .on() handlers so they survive every filterAndRender() call.
 
-  function tryExpandTimeRange(xRangeStart) {
-    if (_expanding) return;
-    if (!TS.length) return;
+const MIN_SPAN_MS = 30 * 60 * 1000;   // 30 min hard floor for zoom-in
 
-    const sel      = document.getElementById('sel-range');
-    const mins     = parseInt(sel.value);
-    const dataEnd  = new Date(TS[TS.length - 1]);
-    const dataStart = new Date(dataEnd.getTime() - mins * 60 * 1000);
+let _zooming = false;   // shared guard for expansion and span-clamping
 
-    // Only expand when the panned/zoomed X start is before the data window start
-    if (new Date(xRangeStart) < dataStart && sel.selectedIndex < sel.options.length - 1) {
-      _expanding = true;
-      sel.selectedIndex++;
-      filterAndRender();
-      _expanding = false;
-    }
+function _tryExpand(x0str) {
+  if (_zooming || !TS.length) return;
+  const sel       = document.getElementById('sel-range');
+  const dataEnd   = new Date(TS[TS.length - 1]);
+  const dataStart = new Date(dataEnd.getTime() - parseInt(sel.value) * 60 * 1000);
+  if (new Date(x0str) < dataStart && sel.selectedIndex < sel.options.length - 1) {
+    _zooming = true;
+    sel.selectedIndex++;
+    filterAndRender();
+    _zooming = false;
   }
+}
 
-  // Attach AFTER the initial filterAndRender() so the Plotly div exists.
-  // Plotly.react() preserves event listeners on the same div element, so
-  // this only needs to run once.
-  function attachListener() {
-    document.getElementById('chart-counts').on('plotly_relayout', function (ev) {
-      // Only care about explicit X range changes, not autorange resets.
+function _clampSpan(divId, x0str, x1str) {
+  if (_zooming) return;
+  const span = new Date(x1str) - new Date(x0str);
+  if (span >= MIN_SPAN_MS) return;
+  _zooming = true;
+  const mid = (new Date(x0str).getTime() + new Date(x1str).getTime()) / 2;
+  const r0  = new Date(mid - MIN_SPAN_MS / 2).toISOString();
+  const r1  = new Date(mid + MIN_SPAN_MS / 2).toISOString();
+  requestAnimationFrame(function () {
+    Plotly.relayout(divId, { 'xaxis.range[0]': r0, 'xaxis.range[1]': r1 });
+    _zooming = false;
+  });
+}
+
+window._attachZoomListeners = function () {
+  ['chart-counts', 'chart-pm', 'chart-env'].forEach(function (divId) {
+    document.getElementById(divId).on('plotly_relayout', function (ev) {
       const x0 = ev['xaxis.range[0]'];
-      if (x0 !== undefined) tryExpandTimeRange(x0);
+      const x1 = ev['xaxis.range[1]'];
+      if (x0 === undefined) return;
+      // Zoom-in limit: check span first so _zooming is set before _tryExpand
+      if (x1 !== undefined) _clampSpan(divId, x0, x1);
+      // Zoom-out expansion (only fires when not at 7-day max)
+      _tryExpand(x0);
     });
-  }
-
-  // Exposed so the initial-render block below can call it.
-  window._attachZoomExpansion = attachListener;
-})();
+  });
+};
 
 // ── Initial render ────────────────────────────────────────────────────────────
 filterAndRender();
-// Attach zoom-expansion listener now that chart-counts div is initialised.
-window._attachZoomExpansion();
+// Attach after initial render so all three chart divs exist.
+window._attachZoomListeners();
 
 // ── Close notification dropdown on outside click ──────────────────────────────
 document.addEventListener('click', function (e) {
