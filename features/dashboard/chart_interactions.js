@@ -282,78 +282,134 @@ function filterAndRender() {
     },
   }), PLOTLY_CFG);
 
+  // Update per-chart left bounds used by the zoom listener to enforce the
+  // 7-day hard stop.  Set only at max dropdown so the expansion listener can
+  // still fire at smaller ranges (it checks sel.selectedIndex < max).
+  _leftBound['chart-counts'] = (isAtMax && ts.length > 0)           ? ts[0]          : null;
+  _leftBound['chart-pm']     = (isAtMax && ts.length > 0)           ? ts[0]          : null;
+  _leftBound['chart-env']    = (isAtMax && LIVE_TS.length > livei)  ? LIVE_TS[livei] : null;
+
   updateStats(i);
 }
 
 // ── Zoom behaviour: expansion, left/right hard stops, zoom-in limit ───────────
 //
-// Three rules enforced on every time-series chart (counts, PM, env):
+// Rules enforced on every time-series chart (counts, PM, env):
 //
-//   Zoom-out expansion  When X left edge crosses the data-window start,
-//                       step the dropdown to the next larger option and
-//                       reload all charts via filterAndRender().
+//   Zoom-out expansion   When X left edge crosses the data-window start and
+//                        we are not yet at the 7-day max, step the dropdown
+//                        up and reload.
 //
-//   Left hard stop      At the 7-day max dropdown, minallowed in the layout
-//                       tells Plotly to refuse any move past the data start —
-//                       no listener needed for that case.
+//   Left hard stop       Two layers:
+//     Layout layer       minallowed in the Plotly layout (set at max only).
+//     Listener layer     _leftBound[divId] — when x0 < leftBound the listener
+//                        snaps the axis back.  Catches cases where Plotly's
+//                        minallowed alone is insufficient.
 //
-//   Right hard stop     maxallowed is always set to the latest sample in
-//                       the layout, so no chart can pan into the future.
+//   Right hard stop      maxallowed always set to the latest sample (layout).
 //
-//   Zoom-in limit       If the visible span shrinks below MIN_SPAN_MS
-//                       (30 min ≈ 10–12 clicks from the default 24 h view),
-//                       snap the axis back to MIN_SPAN_MS centred on the
-//                       current midpoint.  Uses requestAnimationFrame so the
-//                       correction fires in the next frame — avoids
-//                       synchronous re-entrancy inside plotly_relayout.
-//
-// A single shared flag (_zooming) makes expansion and span-clamping mutually
-// exclusive and prevents stacking.
-//
-// Listeners are attached once after the initial render.  Plotly.react()
-// preserves .on() handlers so they survive every filterAndRender() call.
+//   Zoom-in limit        Visible span < MIN_SPAN_MS (30 min ≈ 10–12 clicks
+//                        from 24 h) → snap back to MIN_SPAN_MS.
 
+// ── Date helpers ─────────────────────────────────────────────────────────────
+// Plotly relayout events return timestamps as "YYYY-MM-DD HH:MM:SS.mmm"
+// (space-separated).  The space makes it invalid ISO 8601, so new Date() may
+// return NaN in strict engines.  Replace the space with T before parsing.
+function _parseDate(str) {
+  if (typeof str !== 'string') return new Date(+str);
+  return new Date(str.replace(' ', 'T'));
+}
+
+// Format a JS Date as "YYYY-MM-DD HH:MM:SS" in LOCAL time.
+// This matches the format Python writes for timestamps in the CSV, so
+// Plotly interprets the clamped range in the same timezone as the data.
+function _toLocalStr(date) {
+  const p = n => String(n).padStart(2, '0');
+  return date.getFullYear() + '-' + p(date.getMonth() + 1) + '-' + p(date.getDate())
+       + ' ' + p(date.getHours()) + ':' + p(date.getMinutes()) + ':' + p(date.getSeconds());
+}
+
+// ── Shared state ─────────────────────────────────────────────────────────────
 const MIN_SPAN_MS = 30 * 60 * 1000;   // 30 min hard floor for zoom-in
 
-let _zooming = false;   // shared guard for expansion and span-clamping
+// Per-chart left boundary string (data format).  Null = no hard stop (expansion allowed).
+// Updated by filterAndRender() every render; read by the zoom listener.
+const _leftBound = { 'chart-counts': null, 'chart-pm': null, 'chart-env': null };
 
-function _tryExpand(x0str) {
-  if (_zooming || !TS.length) return;
-  const sel       = document.getElementById('sel-range');
-  const dataEnd   = new Date(TS[TS.length - 1]);
-  const dataStart = new Date(dataEnd.getTime() - parseInt(sel.value) * 60 * 1000);
-  if (new Date(x0str) < dataStart && sel.selectedIndex < sel.options.length - 1) {
+let _zooming = false;   // shared guard — prevents re-entrant zoom corrections
+
+// ── Zoom-in clamp ─────────────────────────────────────────────────────────────
+function _clampSpan(divId, x0str, x1str) {
+  if (_zooming) return;
+  try {
+    const x0ms = _parseDate(x0str).getTime();
+    const x1ms = _parseDate(x1str).getTime();
+    if (isNaN(x0ms) || isNaN(x1ms)) return;
+    const span = x1ms - x0ms;
+    if (span >= MIN_SPAN_MS) return;
     _zooming = true;
-    sel.selectedIndex++;
-    filterAndRender();
+    const mid = (x0ms + x1ms) / 2;
+    const r0  = _toLocalStr(new Date(mid - MIN_SPAN_MS / 2));
+    const r1  = _toLocalStr(new Date(mid + MIN_SPAN_MS / 2));
+    requestAnimationFrame(function () {
+      Plotly.relayout(divId, { 'xaxis.range[0]': r0, 'xaxis.range[1]': r1 });
+      _zooming = false;
+    });
+  } catch (e) {
+    _zooming = false;   // never leave the flag stuck on error
+  }
+}
+
+// ── Left-edge handler (zoom-out expansion OR hard-stop clamp) ─────────────────
+function _handleLeftEdge(divId, x0str) {
+  if (_zooming || !TS.length) return;
+  try {
+    const sel       = document.getElementById('sel-range');
+    const dataEnd   = _parseDate(TS[TS.length - 1]);
+    const dataStart = new Date(dataEnd.getTime() - parseInt(sel.value) * 60 * 1000);
+    const x0        = _parseDate(x0str);
+    if (isNaN(x0.getTime())) return;
+
+    if (x0 >= dataStart) return;   // within the current window — nothing to do
+
+    if (sel.selectedIndex < sel.options.length - 1) {
+      // Not at max: expand the time range one step
+      _zooming = true;
+      sel.selectedIndex++;
+      filterAndRender();
+      _zooming = false;
+    } else {
+      // At 7-day max: snap back to the stored left boundary for this chart
+      const lb = _leftBound[divId];
+      if (!lb) return;
+      _zooming = true;
+      requestAnimationFrame(function () {
+        Plotly.relayout(divId, { 'xaxis.range[0]': lb });
+        _zooming = false;
+      });
+    }
+  } catch (e) {
     _zooming = false;
   }
 }
 
-function _clampSpan(divId, x0str, x1str) {
-  if (_zooming) return;
-  const span = new Date(x1str) - new Date(x0str);
-  if (span >= MIN_SPAN_MS) return;
-  _zooming = true;
-  const mid = (new Date(x0str).getTime() + new Date(x1str).getTime()) / 2;
-  const r0  = new Date(mid - MIN_SPAN_MS / 2).toISOString();
-  const r1  = new Date(mid + MIN_SPAN_MS / 2).toISOString();
-  requestAnimationFrame(function () {
-    Plotly.relayout(divId, { 'xaxis.range[0]': r0, 'xaxis.range[1]': r1 });
-    _zooming = false;
-  });
-}
-
+// ── Attach listeners ──────────────────────────────────────────────────────────
 window._attachZoomListeners = function () {
   ['chart-counts', 'chart-pm', 'chart-env'].forEach(function (divId) {
     document.getElementById(divId).on('plotly_relayout', function (ev) {
-      const x0 = ev['xaxis.range[0]'];
-      const x1 = ev['xaxis.range[1]'];
+      // Plotly may report the X range as individual keys OR as an array.
+      let x0 = ev['xaxis.range[0]'];
+      let x1 = ev['xaxis.range[1]'];
+      if (x0 === undefined && Array.isArray(ev['xaxis.range'])) {
+        x0 = ev['xaxis.range'][0];
+        x1 = ev['xaxis.range'][1];
+      }
       if (x0 === undefined) return;
-      // Zoom-in limit: check span first so _zooming is set before _tryExpand
+
+      // Zoom-in check first (sets _zooming before the expand check)
       if (x1 !== undefined) _clampSpan(divId, x0, x1);
-      // Zoom-out expansion (only fires when not at 7-day max)
-      _tryExpand(x0);
+      // Left-edge check: expand or hard-stop
+      _handleLeftEdge(divId, x0);
     });
   });
 };
