@@ -382,10 +382,24 @@ window._attachWheelListeners();
 // Attach modebar +/- listeners after charts exist in the DOM.
 window._attachRelayoutListeners();
 
-// ── Close notification dropdown on outside click ──────────────────────────────
 document.addEventListener('click', function (e) {
   var drop = document.getElementById('notif-drop');
   if (drop && drop.classList.contains('open') && !drop.parentElement.contains(e.target)) {
     drop.classList.remove('open');
+  }
+});
+
+// ── Attach keyboard shortcuts (+/-) ───────────────────────────────────────────
+window.addEventListener('keydown', function(ev) {
+  // Ignore if user is typing in an input/textarea
+  if (ev.target.tagName === 'INPUT' || ev.target.tagName === 'TEXTAREA') return;
+
+  // '-' or '_' zooms out (+1)
+  if (ev.key === '-' || ev.key === '_') {
+    _stepZoom(+1);
+  }
+  // '+' or '=' zooms in (-1)
+  else if (ev.key === '+' || ev.key === '=') {
+    _stepZoom(-1);
   }
 });
