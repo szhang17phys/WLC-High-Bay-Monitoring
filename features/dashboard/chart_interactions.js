@@ -4,17 +4,14 @@
 // Embedded verbatim by particle_plus.py::generate_dashboard_html() immediately
 // after the data-constants block (TS, COUNTS, PM, DIST, LIVE_TS, etc.).
 //
-// Fixes in this file:
-//   1. All particle & env Y axes are stable — pre-computed from the full
-//      dataset so they never jump when the time-range dropdown or zoom changes.
-//   2. fixedrange: true on every Y axis → +/- and scroll-zoom only affect X.
-//   3. scrollZoom: true so trackpad / mouse-wheel zooms the time axis.
-//   4. Zoom-out expansion: when the user zooms/scrolls past the left edge of
-//      the current time window, the dropdown steps up automatically and the
-//      chart reloads with more data.  Two intermediate steps (2 days, 3 days)
-//      are inserted into the dropdown so expansion is gradual.
-
-// (Dynamic dropdown insertion removed, options now defined in particle_plus.py HTML template)
+// Zoom model: discrete step-based.
+//   Scroll wheel / trackpad steps the dropdown through 6 fixed time windows:
+//     30 min → 1 hr → 6 hr → 12 hr → 24 hr → 7 days
+//   Scroll up  (deltaY < 0) = zoom in  → smaller time window (more detail).
+//   Scroll down (deltaY > 0) = zoom out → larger time window (less detail).
+//   Hard stops: 30 min (can't zoom in further), 7 days (can't zoom out further).
+//   Each step calls filterAndRender() which resets all charts to the exact
+//   selected window — no pixel-level drift, no out-of-bounds issues.
 
 // ── Stable Y ranges — computed ONCE from the full dataset at page load ────────
 // Using all data (not the current time slice) means Y never jumps when the
@@ -62,10 +59,12 @@ const DARK = {
 };
 
 // ── Plotly config shared across all charts ────────────────────────────────────
+// scrollZoom: false — native Plotly scroll zoom disabled; handled by
+// _attachWheelListeners() instead so scroll steps the dropdown discretely.
 const PLOTLY_CFG = {
   responsive:             true,
   displaylogo:            false,
-  scrollZoom:             true,
+  scrollZoom:             false,
   modeBarButtonsToRemove: ['select2d', 'lasso2d'],
 };
 
@@ -154,6 +153,9 @@ function updateStats(i) {
 }
 
 // ── Main render function ──────────────────────────────────────────────────────
+// Always reads the current dropdown value and renders all four charts to exactly
+// that time window.  The explicit xaxis.range guarantees the viewport snaps to
+// the clean selected window on every call — no drift possible.
 function filterAndRender() {
   const sel  = document.getElementById('sel-range');
   const mins = parseInt(sel.value);
@@ -161,21 +163,16 @@ function filterAndRender() {
   const ts   = TS.slice(i);
   const gaps = gapShapes(ts);
 
-  // X axis hard bounds for particle charts:
-  //   maxallowed = latest data point — always set so zooming/panning cannot
-  //                drift into the future (prevents the chart reaching 2050+).
-  //   minallowed = first data point in the current slice — only set at the
-  //                maximum dropdown option (7 days) to stop left-expansion;
-  //                left unset below max so the zoom-out expansion listener fires.
-  const isAtMax = sel.selectedIndex >= sel.options.length - 1;
-  const xBounds = ts.length > 0 ? Object.assign(
-    { maxallowed: ts[ts.length - 1] },
-    isAtMax ? { minallowed: ts[0] } : {}
-  ) : {};
+  // maxallowed: prevents the chart from drifting into the future.
+  // Explicit range: resets the viewport to the exact selected window on every render.
+  const xBounds = ts.length > 0 ? { maxallowed: TS[TS.length - 1] } : {};
+  const xRange  = ts.length > 0
+    ? { range: [ts[0], ts[ts.length - 1]], autorange: false }
+    : {};
 
   // ── Particle count chart (log scale) ─────────────────────────────────────
-  // yaxis.fixedrange: true  →  +/- and scroll-zoom only move the X (time) axis.
-  // autorange: false + COUNTS_Y_RANGE  →  Y never jumps on dropdown changes.
+  // yaxis.fixedrange: true  →  scroll and +/- only move the X (time) axis.
+  // autorange: false + COUNTS_Y_RANGE  →  Y never jumps on window changes.
   const p1 = Plotly.react('chart-counts', sliceTraces(COUNTS, i),
     Object.assign({}, DARK, {
       yaxis: Object.assign({}, DARK.yaxis, {
@@ -185,19 +182,13 @@ function filterAndRender() {
         range:      COUNTS_Y_RANGE,
         fixedrange: true,
       }),
-      xaxis:       Object.assign({}, DARK.xaxis, { title: '' }, xBounds),
+      xaxis:       Object.assign({}, DARK.xaxis, { title: '' }, xBounds, xRange),
       margin:      { l: 60, r: 72, t: 30, b: 50 },
       shapes:      [...gaps, ...isoShapes()],
       annotations: isoAnnotations(),
     }), PLOTLY_CFG);
 
   // ── PM mass chart (linear scale) ─────────────────────────────────────────
-  // Explicit xaxis.range resets the viewport to the current window on every
-  // filterAndRender call (dropdown change or zoom-out expansion), preventing
-  // a stale out-of-bounds range from persisting after the expansion step.
-  const pmXRange = ts.length > 0
-    ? { range: [ts[0], ts[ts.length - 1]], autorange: false }
-    : {};
   const p2 = Plotly.react('chart-pm', sliceTraces(PM, i),
     Object.assign({}, DARK, {
       yaxis: Object.assign({}, DARK.yaxis, {
@@ -207,13 +198,13 @@ function filterAndRender() {
         autorange:  false,
         fixedrange: true,
       }),
-      xaxis:  Object.assign({}, DARK.xaxis, { title: '' }, xBounds, pmXRange),
+      xaxis:  Object.assign({}, DARK.xaxis, { title: '' }, xBounds, xRange),
       shapes: gaps,
     }), PLOTLY_CFG);
 
   // ── Size distribution bar chart ───────────────────────────────────────────
   const _distMax    = (DIST[0] && DIST[0].y.length) ? Math.max(...DIST[0].y) : 100;
-  const _distLogMax = Math.log10(Math.max(_distMax, 1)) + 0.3;
+  const _distLogMax = Math.log10(Math.max(_distMax, 1)) + 1.0;
   const p3 = Plotly.react('chart-dist', DIST,
     Object.assign({}, DARK, {
       showlegend: false,
@@ -232,18 +223,13 @@ function filterAndRender() {
     }), PLOTLY_CFG);
 
   // ── Environment chart (temperature + humidity) ────────────────────────────
-  // TEMP_Y_RANGE / RH_Y_RANGE are computed from the full dataset at page load,
-  // so neither axis jumps when the time window or zoom changes.
-  // fixedrange: true on both Y axes — +/- and scroll only move the X axis,
-  // keeping the temp and RH scales stable for comparison across sessions.
-  const livei = sliceIdxForArray(LIVE_TS, mins);
-  // Env chart uses LIVE_TS — same logic: maxallowed always set, minallowed only at max.
-  // Explicit range resets the viewport to the current window (same rationale as pmXRange).
-  const envXBounds = LIVE_TS.length > livei ? Object.assign(
-    { maxallowed: LIVE_TS[LIVE_TS.length - 1],
-      range: [LIVE_TS[livei], LIVE_TS[LIVE_TS.length - 1]], autorange: false },
-    isAtMax ? { minallowed: LIVE_TS[livei] } : {}
-  ) : {};
+  // TEMP_Y_RANGE / RH_Y_RANGE are pre-computed from the full dataset so neither
+  // axis jumps when the time window changes.
+  const livei    = sliceIdxForArray(LIVE_TS, mins);
+  const envBounds = LIVE_TS.length > livei ? { maxallowed: LIVE_TS[LIVE_TS.length - 1] } : {};
+  const envRange  = LIVE_TS.length > livei
+    ? { range: [LIVE_TS[livei], LIVE_TS[LIVE_TS.length - 1]], autorange: false }
+    : {};
 
   const p4 = Plotly.react('chart-env', [
     { x: LIVE_TS.slice(livei), y: TEMP_F.slice(livei), name: 'Temperature (°F)',
@@ -254,7 +240,7 @@ function filterAndRender() {
       line: { color: '#1d4ed8', width: 3 }, yaxis: 'y2' },
   ], Object.assign({}, DARK, {
     margin: { l: 60, r: 70, t: 30, b: 50 },
-    xaxis:  Object.assign({}, DARK.xaxis, { title: '' }, envXBounds),
+    xaxis:  Object.assign({}, DARK.xaxis, { title: '' }, envBounds, envRange),
     yaxis:  Object.assign({}, DARK.yaxis, {
       title:      'Temperature (°F)',
       autorange:  false,
@@ -275,42 +261,8 @@ function filterAndRender() {
 
   updateStats(i);
 
-  // Update prevRange values at render/range change
-  ['chart-counts', 'chart-pm', 'chart-env'].forEach(function (divId) {
-    const tsArray = (divId === 'chart-env') ? LIVE_TS : TS;
-    if (tsArray.length) {
-      const idx = sliceIdxForArray(tsArray, mins);
-      _updatePrevRange(divId, _parseDate(tsArray[idx]).getTime(), _parseDate(tsArray[tsArray.length - 1]).getTime());
-    }
-  });
-
   return Promise.all([p1, p2, p3, p4]);
 }
-
-// ── Zoom behaviour: expansion, left/right hard stops, zoom-in limit ───────────
-//
-// Rules enforced on every time-series chart (counts, PM, env):
-//
-//   Zoom-out expansion   When X left edge crosses the data-window start and
-//                        we are not yet at the 7-day max, step the dropdown
-//                        up and reload all charts.
-//
-//   Left hard stop       Absolute lower bound: x0 can never go earlier than
-//                        7 days before the latest data point (hardFloorMs).
-//                        This applies at every dropdown level — the expansion
-//                        path no longer returns early, so the correction
-//                        relayout fires even when the dropdown steps up.
-//
-//   Right hard stop      maxallowed in the layout (always the latest sample).
-//
-//   Zoom-in limit        Visible span < 10 min → snap back to 10 min centred.
-//
-// All corrections call Plotly.relayout() synchronously (no requestAnimationFrame).
-// The _zooming flag blocks the recursive plotly_relayout that Plotly emits
-// during the correction, making the synchronous call safe.
-// rAF was removed because it introduced a race: the user's scroll wheel fires
-// many events before the deferred frame fires, sending the axis to sub-second
-// before the correction runs.
 
 // ── Date helpers ─────────────────────────────────────────────────────────────
 // Plotly relayout events return timestamps as "YYYY-MM-DD HH:MM:SS.mmm"
@@ -329,152 +281,63 @@ function _toLocalStr(date) {
        + ' ' + p(date.getHours()) + ':' + p(date.getMinutes()) + ':' + p(date.getSeconds());
 }
 
-// ── Shared constants / state ──────────────────────────────────────────────────
-const MIN_SPAN_MS = 10 * 60 * 1000;   // 10 minutes hard floor for zoom-in (approx 12 steps from 24h)
+// ── Zoom state ────────────────────────────────────────────────────────────────
+// _zooming is a debounce guard: while filterAndRender() is in-flight, incoming
+// wheel events are ignored so rapid scrolling doesn't queue multiple renders.
+let _zooming = false;
 
-let _zooming = false;   // re-entrancy guard — blocks recursive plotly_relayout
-
-// Track visible ranges of the charts to detect zoom-in and anchor appropriately.
-const _prevRange = { 'chart-counts': null, 'chart-pm': null, 'chart-env': null };
-
-function _updatePrevRange(divId, x0, x1) {
-  _prevRange[divId] = { x0: x0, x1: x1 };
+// ── Step-based zoom ───────────────────────────────────────────────────────────
+// direction: -1 = zoom in  (step to smaller time window, decrease selectedIndex)
+//            +1 = zoom out (step to larger time window,  increase selectedIndex)
+//
+// The dropdown options are ordered smallest → largest:
+//   index 0: 30 min  (hard stop — can't zoom in further)
+//   index 1: 1 hr
+//   index 2: 6 hr
+//   index 3: 12 hr
+//   index 4: 24 hr
+//   index 5: 7 days  (hard stop — can't zoom out further)
+//
+// Stepping outside [0, options.length-1] is silently ignored.
+function _stepZoom(direction) {
+  if (_zooming) return;
+  const sel      = document.getElementById('sel-range');
+  const newIndex = sel.selectedIndex + direction;
+  // Hard stops: clamp to valid range and do nothing if already at the limit.
+  if (newIndex < 0 || newIndex >= sel.options.length) return;
+  sel.selectedIndex = newIndex;
+  _zooming = true;
+  filterAndRender().then(function () {
+    _zooming = false;
+  }).catch(function () {
+    _zooming = false;
+  });
 }
 
-// Enforce minimum zoom-in floor, max allowed end date, and zoom-out bounds
-function _enforceZoomConstraints(divId, targetX0, targetX1, x0orig, x1orig) {
-  const tsArray = (divId === 'chart-env') ? LIVE_TS : TS;
-  if (!tsArray.length) return;
-
-  const dataEndMs = _parseDate(tsArray[tsArray.length - 1]).getTime();
-  const dataStartMs = _parseDate(tsArray[0]).getTime();
-  let x0 = targetX0;
-  let x1 = targetX1;
-  let span = x1 - x0;
-
-  // 1. Zoom-in clamp (floor)
-  if (span < MIN_SPAN_MS) {
-    console.log(`[Zoom] ${divId} zoom-in limit hit! Clamping to floor.`);
-    span = Math.min(MIN_SPAN_MS, dataEndMs - dataStartMs);
-    x1 = targetX1;
-    x0 = x1 - span;
-    if (x0 < dataStartMs) {
-      x0 = dataStartMs;
-      x1 = x0 + span;
-    }
-  }
-
-  // 2. Right hard stop (never zoom past latest data)
-  if (x1 > dataEndMs) {
-    console.log(`[Zoom] ${divId} right hard stop hit! Snapping to latest data.`);
-    x0 -= (x1 - dataEndMs);
-    x1 = dataEndMs;
-  }
-
-  // 3. Zoom-out expansion / left hard stop
-  //
-  // hardFloorMs is an absolute lower bound: no matter which dropdown option is
-  // selected, the left edge can never go further back than 7 days from the
-  // latest data point.  This prevents aggressive scroll gestures from jumping
-  // past the 7-day ceiling in a single event (the old "return" path skipped the
-  // correction relayout, leaving the chart at an out-of-bounds viewport).
-  const sel = document.getElementById('sel-range');
-  const mins = parseInt(sel.value);
-  const minAllowedTime = Math.max(dataEndMs - mins * 60 * 1000, dataStartMs);
-  const hardFloorMs    = Math.max(dataEndMs - 7 * 24 * 60 * 60 * 1000, dataStartMs);
-
-  if (x0 < minAllowedTime) {
-    if (sel.selectedIndex < sel.options.length - 1) {
-      // Below max: step the dropdown up and reload (fire-and-forget — the
-      // correction relayout below handles the visible range immediately).
-      console.log(`[Zoom] ${divId} left edge crossed current window! Expanding dropdown from ${mins} mins.`);
-      _zooming = true;
-      sel.selectedIndex++;
-      filterAndRender().then(function () {
-        _zooming = false;
-      }).catch(function () {
-        _zooming = false;
-      });
-      // No return: fall through so x0/x1 are clamped and the relayout fires.
-    } else {
-      console.log(`[Zoom] ${divId} zoom-out limit hit! Snapping to 7-day floor.`);
-    }
-    // Enforce the hard 7-day floor regardless of which branch ran above.
-    x0 = Math.max(x0, hardFloorMs);
-    x1 = Math.min(x0 + span, dataEndMs);
-  }
-
-  // If computed range differs from the original layout range, perform Plotly relayout.
-  if (Math.abs(x0 - x0orig) > 1000 || Math.abs(x1 - x1orig) > 1000) {
-    console.log(`[Zoom] ${divId} performing relayout: [${_toLocalStr(new Date(x0))} to ${_toLocalStr(new Date(x1))}]`);
-    _zooming = true;
-    Plotly.relayout(divId, {
-      'xaxis.range[0]': _toLocalStr(new Date(x0)),
-      'xaxis.range[1]': _toLocalStr(new Date(x1))
-    }).then(function () {
-      _zooming = false;
-      _updatePrevRange(divId, x0, x1);
-    }).catch(function () {
-      _zooming = false;
-    });
-  } else {
-    _updatePrevRange(divId, x0, x1);
-  }
-}
-
-// ── Attach listeners ──────────────────────────────────────────────────────────
-window._attachZoomListeners = function () {
+// ── Attach wheel listeners ────────────────────────────────────────────────────
+// Intercepts scroll-wheel / trackpad events on all three time-series chart divs
+// and converts them into discrete zoom steps via _stepZoom().
+//
+// Convention (matches Plotly's original scroll direction):
+//   deltaY < 0  (scroll up / pinch out)  → zoom in  → _stepZoom(-1)
+//   deltaY > 0  (scroll down / pinch in) → zoom out → _stepZoom(+1)
+//
+// { passive: false } is required so that ev.preventDefault() can suppress the
+// browser's default page-scroll behaviour while the cursor is over a chart.
+window._attachWheelListeners = function () {
   ['chart-counts', 'chart-pm', 'chart-env'].forEach(function (divId) {
-    document.getElementById(divId).on('plotly_relayout', function (ev) {
-      if (_zooming) return;
-
-      // Handle both Plotly event formats for X range:
-      let x0 = ev['xaxis.range[0]'];
-      let x1 = ev['xaxis.range[1]'];
-      if (x0 === undefined && Array.isArray(ev['xaxis.range'])) {
-        x0 = ev['xaxis.range'][0];
-        x1 = ev['xaxis.range'][1];
-      }
-      if (x0 === undefined) return;
-
-      const x0ms = _parseDate(x0).getTime();
-      const x1ms = _parseDate(x1).getTime();
-      if (isNaN(x0ms) || isNaN(x1ms)) return;
-
-      const newSpan = x1ms - x0ms;
-      const prev = _prevRange[divId];
-      let isZoomIn = false;
-      if (prev) {
-        const prevSpan = prev.x1 - prev.x0;
-        if (newSpan < prevSpan - 1000) {
-          isZoomIn = true;
-        }
-      }
-
-      let targetX0 = x0ms;
-      let targetX1 = x1ms;
-
-      const tsArray = (divId === 'chart-env') ? LIVE_TS : TS;
-      if (tsArray.length && isZoomIn && prev) {
-        const dataEndMs = _parseDate(tsArray[tsArray.length - 1]).getTime();
-        // Prefer towards the right side (towards the latest data) when zooming in
-        let rightEdge = prev.x1;
-        if (dataEndMs - rightEdge < 5 * 60 * 1000) {
-          rightEdge = dataEndMs;
-        }
-        targetX1 = rightEdge;
-        targetX0 = rightEdge - newSpan;
-      }
-
-      _enforceZoomConstraints(divId, targetX0, targetX1, x0ms, x1ms);
-    });
+    document.getElementById(divId).addEventListener('wheel', function (ev) {
+      ev.preventDefault();
+      // deltaY > 0: scroll down = zoom out (+1); deltaY < 0: scroll up = zoom in (-1)
+      _stepZoom(ev.deltaY > 0 ? +1 : -1);
+    }, { passive: false });
   });
 };
 
 // ── Initial render ────────────────────────────────────────────────────────────
 filterAndRender();
-// Attach after initial render so all three chart divs exist.
-window._attachZoomListeners();
+// Attach wheel listeners after charts exist in the DOM.
+window._attachWheelListeners();
 
 // ── Close notification dropdown on outside click ──────────────────────────────
 document.addEventListener('click', function (e) {
