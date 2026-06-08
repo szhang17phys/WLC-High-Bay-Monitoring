@@ -483,13 +483,15 @@ function filterAndRender() {
 //                        we are not yet at the 7-day max, step the dropdown
 //                        up and reload all charts.
 //
-//   Left hard stop       At 7-day max, snap x0 back to TS[sliceIdx(mins)]
-//                        (first timestamp in the current window), computed
-//                        fresh from the data at event time — no stored state.
+//   Left hard stop       Absolute lower bound: x0 can never go earlier than
+//                        7 days before the latest data point (hardFloorMs).
+//                        This applies at every dropdown level — the expansion
+//                        path no longer returns early, so the correction
+//                        relayout fires even when the dropdown steps up.
 //
 //   Right hard stop      maxallowed in the layout (always the latest sample).
 //
-//   Zoom-in limit        Visible span < 1 min → snap back to 1 min centred.
+//   Zoom-in limit        Visible span < 10 min → snap back to 10 min centred.
 //
 // All corrections call Plotly.relayout() synchronously (no requestAnimationFrame).
 // The _zooming flag blocks the recursive plotly_relayout that Plotly emits
@@ -558,13 +560,21 @@ function _enforceZoomConstraints(divId, targetX0, targetX1, x0orig, x1orig) {
   }
 
   // 3. Zoom-out expansion / left hard stop
+  //
+  // hardFloorMs is an absolute lower bound: no matter which dropdown option is
+  // selected, the left edge can never go further back than 7 days from the
+  // latest data point.  This prevents aggressive scroll gestures from jumping
+  // past the 7-day ceiling in a single event (the old "return" path skipped the
+  // correction relayout, leaving the chart at an out-of-bounds viewport).
   const sel = document.getElementById('sel-range');
   const mins = parseInt(sel.value);
   const minAllowedTime = Math.max(dataEndMs - mins * 60 * 1000, dataStartMs);
+  const hardFloorMs    = Math.max(dataEndMs - 7 * 24 * 60 * 60 * 1000, dataStartMs);
 
   if (x0 < minAllowedTime) {
     if (sel.selectedIndex < sel.options.length - 1) {
-      // Below max: step the dropdown up and reload
+      // Below max: step the dropdown up and reload (fire-and-forget — the
+      // correction relayout below handles the visible range immediately).
       console.log(`[Zoom] ${divId} left edge crossed current window! Expanding dropdown from ${mins} mins.`);
       _zooming = true;
       sel.selectedIndex++;
@@ -573,13 +583,13 @@ function _enforceZoomConstraints(divId, targetX0, targetX1, x0orig, x1orig) {
       }).catch(function () {
         _zooming = false;
       });
-      return;
+      // No return: fall through so x0/x1 are clamped and the relayout fires.
     } else {
-      // At max (7-day): snap back to left boundary
-      console.log(`[Zoom] ${divId} zoom-out limit hit! Snapping to oldest allowed data.`);
-      x0 = minAllowedTime;
-      x1 = Math.min(x0 + span, dataEndMs);
+      console.log(`[Zoom] ${divId} zoom-out limit hit! Snapping to 7-day floor.`);
     }
+    // Enforce the hard 7-day floor regardless of which branch ran above.
+    x0 = Math.max(x0, hardFloorMs);
+    x1 = Math.min(x0 + span, dataEndMs);
   }
 
   // If computed range differs from the original layout range, perform Plotly relayout.
