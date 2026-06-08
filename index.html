@@ -388,6 +388,12 @@ function filterAndRender() {
     }), PLOTLY_CFG);
 
   // ── PM mass chart (linear scale) ─────────────────────────────────────────
+  // Explicit xaxis.range resets the viewport to the current window on every
+  // filterAndRender call (dropdown change or zoom-out expansion), preventing
+  // a stale out-of-bounds range from persisting after the expansion step.
+  const pmXRange = ts.length > 0
+    ? { range: [ts[0], ts[ts.length - 1]], autorange: false }
+    : {};
   const p2 = Plotly.react('chart-pm', sliceTraces(PM, i),
     Object.assign({}, DARK, {
       yaxis: Object.assign({}, DARK.yaxis, {
@@ -397,7 +403,7 @@ function filterAndRender() {
         autorange:  false,
         fixedrange: true,
       }),
-      xaxis:  Object.assign({}, DARK.xaxis, { title: '' }, xBounds),
+      xaxis:  Object.assign({}, DARK.xaxis, { title: '' }, xBounds, pmXRange),
       shapes: gaps,
     }), PLOTLY_CFG);
 
@@ -428,8 +434,10 @@ function filterAndRender() {
   // keeping the temp and RH scales stable for comparison across sessions.
   const livei = sliceIdxForArray(LIVE_TS, mins);
   // Env chart uses LIVE_TS — same logic: maxallowed always set, minallowed only at max.
+  // Explicit range resets the viewport to the current window (same rationale as pmXRange).
   const envXBounds = LIVE_TS.length > livei ? Object.assign(
-    { maxallowed: LIVE_TS[LIVE_TS.length - 1] },
+    { maxallowed: LIVE_TS[LIVE_TS.length - 1],
+      range: [LIVE_TS[livei], LIVE_TS[LIVE_TS.length - 1]], autorange: false },
     isAtMax ? { minallowed: LIVE_TS[livei] } : {}
   ) : {};
 
