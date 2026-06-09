@@ -522,7 +522,13 @@ def generate_dashboard_html(csv_path, output_path):
             except Exception:
                 pass
         _all_ts.append((rec_num, r, ts, _dt))
-    _all_ts.sort(key=lambda x: x[0])
+    # Sort by real timestamp, NOT record_number: the counter restarts its record
+    # numbers at 1 after an erase, so a record_number sort would interleave the
+    # post-erase data with the old session and place new points at the wrong time
+    # ("starts from 0"). sync_time/date is wall-clock monotonic across erases;
+    # record_number is kept only as a tie-breaker. Records with no parseable
+    # timestamp sort last (they're positioned by their assigned anchor later).
+    _all_ts.sort(key=lambda x: (x[3] is None, x[3] or datetime.min, x[0]))
 
     # split into batches
     _batches = []

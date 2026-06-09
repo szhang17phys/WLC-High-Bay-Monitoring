@@ -44,6 +44,9 @@ from pymodbus.client import ModbusTcpClient
 # same erase + sync-state reset). Python puts this script's directory on
 # sys.path, so this import works regardless of where you launch from.
 import particle_plus as pp
+# Same sync-state tracking the daemon uses, so we never double-save records that
+# are already in the archive (e.g. running this twice, or after the daemon synced).
+from features.data_manager import get_last_synced, set_last_synced
 
 # ─── CONFIG ───────────────────────────────────────────────
 COUNTER_IP       = pp.COUNTER_IP
@@ -154,10 +157,10 @@ def _latch_and_read(client, i):
     return data
 
 
-def read_all_records(client, total):
-    """Read records 1..total. Returns (records, failed_indices)."""
+def read_all_records(client, start, total):
+    """Read records start..total. Returns (records, failed_indices)."""
     records, failed = [], []
-    for i in range(1, total + 1):
+    for i in range(start, total + 1):
         try:
             data = _retry(_latch_and_read, client, i,
                           what=f'record {i}', client=client)
@@ -219,29 +222,48 @@ def flush_and_erase(client):
         print("Counter is already empty — nothing to flush, nothing to erase.")
         return True
 
-    # ── 2) read every record (all-or-nothing) ────────────────────────────────
-    records, failed = read_all_records(client, total)
-    if failed:
-        print(f"\nABORT: {len(failed)}/{total} records failed to read: {failed}")
-        print("Nothing saved, NOTHING erased. Fix the connection and re-run.")
-        return False
-    if len(records) != total:
-        print(f"\nABORT: read {len(records)} records but expected {total}. "
-              f"NOTHING erased.")
-        return False
+    # ── 2) figure out which records are NOT yet in the archive ────────────────
+    # Same sync-state the daemon keeps. A count LOWER than last_synced means the
+    # counter was erased and restarted at 1, so we re-flush from the beginning.
+    last_synced = get_last_synced(pp.COUNTER_STATE)
+    if last_synced > total:
+        print(f"Counter reset detected (state {last_synced} > counter {total}) — "
+              f"re-flushing from record 1.")
+        last_synced = 0
+    start = last_synced + 1
 
-    # ── 3) append to the archive ─────────────────────────────────────────────
-    rows_before = count_csv_rows(OUTPUT_CSV)
-    if not pp.save_to_csv(records, OUTPUT_CSV):
-        print("ABORT: save_to_csv reported failure. NOTHING erased.")
-        return False
+    if start > total:
+        # Everything on the counter is already archived (e.g. the daemon already
+        # synced it, or this tool was run before). Nothing new to save.
+        print(f"All {total} records are already in the archive "
+              f"(synced up to {last_synced}) — no new records to save, no duplicates.")
+    else:
+        n_new = total - last_synced
+        print(f"Reading {n_new} new record(s): {start}..{total}")
 
-    # ── 4) VERIFY the data is really on disk before any erase ────────────────
-    if not verify_saved(OUTPUT_CSV, records, rows_before):
-        print("ABORT: could not verify the archive write. NOTHING erased.")
-        return False
+        # ── 3) read the new records (all-or-nothing) ─────────────────────────
+        records, failed = read_all_records(client, start, total)
+        if failed:
+            print(f"\nABORT: {len(failed)}/{n_new} records failed to read: {failed}")
+            print("Nothing saved, NOTHING erased. Fix the connection and re-run.")
+            return False
+        if len(records) != n_new:
+            print(f"\nABORT: read {len(records)} records but expected {n_new}. "
+                  f"NOTHING erased.")
+            return False
 
-    print(f"\nAll {total} records saved AND verified in:\n  {OUTPUT_CSV}")
+        # ── 4) append to the archive, then VERIFY before any erase ───────────
+        rows_before = count_csv_rows(OUTPUT_CSV)
+        if not pp.save_to_csv(records, OUTPUT_CSV):
+            print("ABORT: save_to_csv reported failure. NOTHING erased.")
+            return False
+        if not verify_saved(OUTPUT_CSV, records, rows_before):
+            print("ABORT: could not verify the archive write. NOTHING erased.")
+            return False
+        set_last_synced(pp.COUNTER_STATE, total)
+        print(f"\nSaved AND verified {n_new} new record(s) → {OUTPUT_CSV}")
+
+    print(f"All {total} counter records are now in the archive.")
 
     # ── 5) erase — only now, only if explicitly enabled ──────────────────────
     if not ERASE_AFTER_SYNC:
@@ -250,7 +272,7 @@ def flush_and_erase(client):
               "to wipe the counter.")
         return True
 
-    print("\nData verified — erasing counter memory…")
+    print("\nData safe in the archive — erasing counter memory…")
     # pp.erase_counter writes the magic value, verifies 0 remaining, and resets
     # the daemon's counter_state.json so its next sync starts cleanly.
     if pp.erase_counter(client):
