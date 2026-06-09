@@ -684,21 +684,20 @@ def generate_dashboard_html(csv_path, output_path):
     )
 
     # ── pre-serialise all JS data (avoids f-string brace escaping) ────────────
+    from features.dashboard.plot_builder import build_series_traces
     ts_js            = json.dumps(_plot_timestamps)
-    counts_traces_js = json.dumps([
-        {'x': _plot_timestamps, 'y': ch_counts[i],
-         'name': f'\u2265{ch_sizes[i]}\u00b5m',
-         'type': 'scatter', 'mode': 'lines',
-         'line': {'color': ch_colors[i-1], 'width': 3, 'shape': 'hv'}}
-        for i in range(1, 7)
-    ])
-    pm_traces_js = json.dumps([
-        {'x': _plot_timestamps, 'y': ch_pm[i],
-         'name': f'PM\u2265{ch_sizes[i]}\u00b5m',
-         'type': 'scatter', 'mode': 'lines',
-         'line': {'color': pm_colors[i-1], 'width': 3, 'shape': 'hv'}}
-        for i in range(1, 7)
-    ])
+    counts_traces_js = json.dumps(build_series_traces(
+        _plot_timestamps,
+        [ch_counts[i] for i in range(1, 7)],
+        [f'\u2265{ch_sizes[i]}\u00b5m' for i in range(1, 7)],
+        [ch_colors[i-1] for i in range(1, 7)],
+    ))
+    pm_traces_js = json.dumps(build_series_traces(
+        _plot_timestamps,
+        [ch_pm[i] for i in range(1, 7)],
+        [f'PM\u2265{ch_sizes[i]}\u00b5m' for i in range(1, 7)],
+        [pm_colors[i-1] for i in range(1, 7)],
+    ))
     raw_latest = [
         next((sf(r.get(f'ch{i}_diff_counts')) for r in reversed(recent)
               if sf(r.get(f'ch{i}_diff_counts')) is not None), 0.0) or 0.0

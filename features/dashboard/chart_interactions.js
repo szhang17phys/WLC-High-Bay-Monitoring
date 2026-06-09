@@ -93,6 +93,67 @@ function sliceTraces(traces, i) {
   }));
 }
 
+// ── Bin-size aggregation for the concentration charts ─────────────────────────
+// The particle/PM data is ~every 4 min. The Bin dropdown (Raw / 10 / 30 / 60 min)
+// optionally aggregates it. Per bin we keep BOTH the mean (trend) and the max
+// (so contamination spikes are not averaged away).
+function _currentBinMins(rangeMins) {
+  if (rangeMins > 1440) return 0;          // auto-disable binning beyond 24 h → Raw
+  const sel = document.getElementById('sel-bin');
+  if (!sel) return 0;                       // dropdown not present yet → Raw
+  const v = parseInt(sel.value);
+  return isNaN(v) ? 0 : v;                  // 0 = Raw
+}
+
+// Group one (timestamps, values) series into fixed time bins. Returns, per bin:
+// the mean timestamp, the mean value, and the max value. Null/NaN are skipped.
+function binMeanMax(tsArr, valArr, binMs) {
+  const buckets = new Map();   // bucketStartMs -> { sumV, sumT, n, max }
+  for (let k = 0; k < tsArr.length; k++) {
+    const v = valArr[k];
+    if (v === null || v === undefined || isNaN(v)) continue;
+    const t = _parseDate(tsArr[k]).getTime();
+    if (isNaN(t)) continue;
+    const key = Math.floor(t / binMs) * binMs;
+    let b = buckets.get(key);
+    if (!b) { b = { sumV: 0, sumT: 0, n: 0, max: -Infinity }; buckets.set(key, b); }
+    b.sumV += v; b.sumT += t; b.n += 1; if (v > b.max) b.max = v;
+  }
+  const keys = Array.from(buckets.keys()).sort((a, b) => a - b);
+  const x = [], mean = [], max = [];
+  for (const key of keys) {
+    const b = buckets.get(key);
+    x.push(_toLocalStr(new Date(b.sumT / b.n)));   // mean time within the bin
+    mean.push(b.sumV / b.n);
+    max.push(b.max);
+  }
+  return { x: x, mean: mean, max: max };
+}
+
+// Turn each raw channel trace into two binned traces: a line at the bin means
+// (trend) and dots at the bin maxes (peaks), color-matched and legend-linked so
+// toggling the channel hides both.
+function _binnedTraces(traces, binMs) {
+  const out = [];
+  traces.forEach(function (tr) {
+    const b = binMeanMax(tr.x, tr.y, binMs);
+    const color = (tr.line && tr.line.color) || '#888';
+    out.push({                       // mean → connected line (trend)
+      x: b.x, y: b.mean, name: tr.name,
+      type: 'scatter', mode: 'lines',
+      line: { color: color, width: 2 },
+      legendgroup: tr.name,
+    });
+    out.push({                       // max → dots riding above the line (peaks)
+      x: b.x, y: b.max, name: tr.name + ' (peak)',
+      type: 'scatter', mode: 'markers',
+      marker: { color: color, size: 5 },
+      legendgroup: tr.name, showlegend: false,
+    });
+  });
+  return out;
+}
+
 function gapShapes(ts) {
   const GAP_THRESH_MS = 90 * 60 * 1000;
   const shapes = [];
@@ -170,10 +231,21 @@ function filterAndRender() {
     ? { range: [ts[0], ts[ts.length - 1]], autorange: false }
     : {};
 
+  // Bin selection (0 = Raw). Auto-disabled beyond a 24 h window: too many bins
+  // would be cluttered/slow, so we fall back to the raw step-lines there.
+  const binMins = _currentBinMins(mins);
+  const binMs   = binMins * 60000;
+  const _binSel = document.getElementById('sel-bin');
+  if (_binSel) _binSel.disabled = (mins > 1440);
+  const countsData = binMins > 0 ? _binnedTraces(sliceTraces(COUNTS, i), binMs)
+                                 : sliceTraces(COUNTS, i);
+  const pmData     = binMins > 0 ? _binnedTraces(sliceTraces(PM, i), binMs)
+                                 : sliceTraces(PM, i);
+
   // ── Particle count chart (log scale) ─────────────────────────────────────
   // yaxis.fixedrange: true  →  scroll and +/- only move the X (time) axis.
   // autorange: false + COUNTS_Y_RANGE  →  Y never jumps on window changes.
-  const p1 = Plotly.react('chart-counts', sliceTraces(COUNTS, i),
+  const p1 = Plotly.react('chart-counts', countsData,
     Object.assign({}, DARK, {
       yaxis: Object.assign({}, DARK.yaxis, {
         title:      'Counts / m³',
@@ -189,7 +261,7 @@ function filterAndRender() {
     }), PLOTLY_CFG);
 
   // ── PM mass chart (linear scale) ─────────────────────────────────────────
-  const p2 = Plotly.react('chart-pm', sliceTraces(PM, i),
+  const p2 = Plotly.react('chart-pm', pmData,
     Object.assign({}, DARK, {
       yaxis: Object.assign({}, DARK.yaxis, {
         title:      'μg / m³',
@@ -555,8 +627,32 @@ function _attachRefreshControl() {
   }
 }
 
+// ── Bin-size dropdown ─────────────────────────────────────────────────────────
+// Injected next to Time Range (so particle_plus.py's header stays untouched); it
+// inherits the existing <select> styling. Changing it re-renders the charts.
+function _attachBinControl() {
+  if (document.getElementById('sel-bin')) return;          // idempotent
+  var rangeSel = document.getElementById('sel-range');
+  if (!rangeSel) return;
+  var rangeGroup = rangeSel.closest('.ctrl-group') || rangeSel.parentNode;
+
+  var group = document.createElement('div');
+  group.className = 'ctrl-group';
+  group.innerHTML =
+    '<label>Bin</label>' +
+    '<select id="sel-bin">' +
+      '<option value="0">Raw</option>' +
+      '<option value="10" selected>10 min</option>' +
+      '<option value="30">30 min</option>' +
+      '<option value="60">1 hr</option>' +
+    '</select>';
+  rangeGroup.parentNode.insertBefore(group, rangeGroup.nextSibling);
+  document.getElementById('sel-bin').addEventListener('change', filterAndRender);
+}
+
 // ── Initial render ────────────────────────────────────────────────────────────
 _restoreTimeRange();   // keep the user's zoom level across reloads
+_attachBinControl();   // inject the Bin dropdown before the first render
 filterAndRender();
 // Attach wheel listeners after charts exist in the DOM.
 window._attachWheelListeners();
