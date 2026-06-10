@@ -1226,7 +1226,7 @@ def generate_dashboard_html(csv_path, output_path):
 
 <div class="header">
   <div class="header-text">
-    <h1><span class="h1-lab">WRIGHT LAB</span><span class="h1-dash">-</span> DUNE HIGH BAY SLOW CONTROL</h1>
+    <h1><span class="h1-lab">WRIGHT LAB</span><span class="h1-comma">-</span> DUNE HIGH BAY SLOW CONTROL</h1>
     <div class="sub">Particulate &amp; Environmental Monitor<span class="sub-sep">&middot;</span>Particles Plus 7301<span class="sub-sep">&middot;</span>CRP Production Area</div>
   </div>
   <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle color theme">
