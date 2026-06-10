@@ -42,7 +42,10 @@ RH_LOW_PCT          = 20.0    # % - dry air / electrostatic risk
 RH_HIGH_PCT         = 90.0    # % - condensation / moisture risk
 TEMP_LOW_F          = 33.0    # degF - abnormally cold / potential freeze risk
 TEMP_HIGH_F         = 120.0   # degF - thermal excursion
-PARTICLE_HIGH_M3    = 100000  # counts/m³ at 0.3 µm - contamination event
+# Tent target is ISO 8. ISO 14644-1 defines no 0.3 µm limit for classes 7-9,
+# so this uses the class-formula equivalent 10^8 x (0.1/0.3)^2.08 ~= 10.2M /m³
+# (CUMULATIVE >= 0.3 µm counts).
+PARTICLE_HIGH_M3    = 10_200_000  # counts/m³ cumulative at 0.3 µm - worse than ISO 8 equiv.
 OFFLINE_ALERT_MIN   = 90      # minutes without a new record before alerting
 
 # Email settings
@@ -181,8 +184,10 @@ def check_alerts():
     temp_c  = safe_float(source.get('temp_C'))
     temp_f  = round(temp_c * 9/5 + 32, 1) if temp_c is not None else None
 
-    # Particle count from latest completed sample (not live, which is mid-sample)
-    ch1_m3  = safe_float(meas.get('ch1_diff_m3')) if meas else None
+    # Particle count from latest completed sample (not live, which is mid-sample).
+    # CUMULATIVE (>= 0.3 µm) count — ISO limits are defined on cumulative counts,
+    # not the differential per-bin ch1_diff_m3.
+    ch1_m3  = safe_float(meas.get('ch1_sum_m3')) if meas else None
 
     # Timestamp of latest measurement to check offline status
     last_meas_dt = None

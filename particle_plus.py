@@ -783,16 +783,13 @@ def generate_dashboard_html(csv_path, output_path):
                 _iso_class = _cls
                 break
 
-    # Badge color comes from the theme-aware status classes (CSS variables),
-    # so it stays readable in both dark and light modes.
+    # Badge color comes from the theme-aware status classes (CSS variables).
+    # Tent target is ISO 8: green at or better than ISO 8, red when worse.
     if _iso_class is None:
         _iso_cls   = 'status-mute'
         _iso_label = 'ISO —'
-    elif _iso_class <= 6:
+    elif _iso_class <= 8:
         _iso_cls   = 'status-ok'
-        _iso_label = f'ISO&nbsp;{_iso_class}'
-    elif _iso_class == 7:
-        _iso_cls   = 'status-warn'
         _iso_label = f'ISO&nbsp;{_iso_class}'
     else:
         _iso_cls   = 'status-fault'
@@ -803,10 +800,13 @@ def generate_dashboard_html(csv_path, output_path):
     )
 
     # ── notification center ────────────────────────────────────────────────────
-    # Thresholds mirror features/alerts/alerts.py defaults
+    # Thresholds mirror features/alerts/alerts.py defaults.
+    # Tent target is ISO 8. ISO 14644-1 defines no 0.3 µm limit for ISO 7-9,
+    # so the 0.3 µm threshold uses the class formula 10^N x (0.1/D)^2.08:
+    # ISO 8 equivalent at 0.3 µm ~= 10,200,000 /m³ (cumulative).
     _N_RH_LOW   = 20.0;  _N_RH_HIGH   = 90.0
     _N_TF_LOW   = 33.0;  _N_TF_HIGH   = 120.0
-    _N_P_HIGH   = 100000
+    _N_P_HIGH   = 10_200_000
 
     # Read alert state written by alerts.py (if it exists)
     _alert_state = {}
@@ -837,48 +837,50 @@ def generate_dashboard_html(csv_path, output_path):
     else:
         _notif_rows.append(('alert', '▲ Last sample: unknown — no data received'))
 
-    # 2. ISO classification — red if ISO >= 8, yellow if ISO 7, green if <= 6
+    # 2. ISO classification — tent target is ISO 8: at or better than ISO 8 is
+    #    nominal, ISO 9 (or unclassifiable) is the problem state.
     if _iso_class is not None:
-        if _iso_class <= 6:
+        if _iso_class <= 8:
             _notif_rows.append(('ok',
-                f'● ISO class: ISO {_iso_class} — within target'))
-        elif _iso_class == 7:
-            _notif_rows.append(('warn',
-                f'▲ ISO class: ISO {_iso_class} — marginal (target: ISO 6)'))
+                f'● ISO class: ISO {_iso_class} — within ISO 8 target'))
         else:
             _notif_rows.append(('alert',
-                f'▲ ISO class: ISO {_iso_class} — EXCEEDS ISO 7 limit'))
+                f'▲ ISO class: ISO {_iso_class} — WORSE than ISO 8 target'))
     else:
         _notif_rows.append(('alert',
             '▲ ISO class: unclassifiable — particle count off-scale'))
 
-    # 3. >=0.5 um concentration vs ISO 6 limit (35,200 /m3)
-    _p05_now = sf(_latest_rec.get('ch2_diff_m3')) if _latest_rec else None
+    # 3. >=0.5 um CUMULATIVE concentration vs ISO 8 limit (3,520,000 /m3).
+    #    ISO limits are defined on cumulative (>= size) counts, so use
+    #    ch2_sum_m3 — NOT the differential ch2_diff_m3.
+    _p05_now = sf(_latest_rec.get('ch2_sum_m3')) if _latest_rec else None
     if _p05_now is not None:
-        if _p05_now > 352000:
+        if _p05_now > 3520000:
             _notif_rows.append(('alert',
-                f'▲ ≥0.5µm {_p05_now:,.0f}/m³ — exceeds ISO 7 (352 000)'))
-        elif _p05_now > 35200:
+                f'▲ ≥0.5µm {_p05_now:,.0f}/m³ — exceeds ISO 8 (3 520 000)'))
+        elif _p05_now > 352000:
             _notif_rows.append(('warn',
-                f'▲ ≥0.5µm {_p05_now:,.0f}/m³ — exceeds ISO 6 (35 200)'))
+                f'▲ ≥0.5µm {_p05_now:,.0f}/m³ — above ISO 7 (352 000), nearing ISO 8 limit'))
         else:
             _notif_rows.append(('ok',
-                f'● ≥0.5µm {_p05_now:,.0f}/m³ — within ISO 6'))
+                f'● ≥0.5µm {_p05_now:,.0f}/m³ — within ISO 8'))
     else:
         _notif_rows.append(('mute', '○ ≥0.5µm: no data'))
 
-    # 4. >=0.3 um concentration vs ISO 6 limit (102,000 /m3)
-    _p_now = sf(_latest_rec.get('ch1_diff_m3')) if _latest_rec else None
+    # 4. >=0.3 um CUMULATIVE concentration. ISO 7-9 define no 0.3 µm limit,
+    #    so compare against the ISO 8 EQUIVALENT from the class formula
+    #    (~10,200,000 /m3 = _N_P_HIGH); warn above the ISO 7 equivalent.
+    _p_now = sf(_latest_rec.get('ch1_sum_m3')) if _latest_rec else None
     if _p_now is not None:
         if _p_now > _N_P_HIGH:
             _notif_rows.append(('alert',
-                f'▲ ≥0.3µm {_p_now:,.0f}/m³ — above contamination threshold'))
-        elif _p_now > 102000:
+                f'▲ ≥0.3µm {_p_now:,.0f}/m³ — exceeds ISO 8 equiv. (10 200 000)'))
+        elif _p_now > 1020000:
             _notif_rows.append(('warn',
-                f'▲ ≥0.3µm {_p_now:,.0f}/m³ — exceeds ISO 6 (102 000)'))
+                f'▲ ≥0.3µm {_p_now:,.0f}/m³ — above ISO 7 equiv. (1 020 000)'))
         else:
             _notif_rows.append(('ok',
-                f'● ≥0.3µm {_p_now:,.0f}/m³ — within ISO 6'))
+                f'● ≥0.3µm {_p_now:,.0f}/m³ — within ISO 8 equiv.'))
     else:
         _notif_rows.append(('mute', '○ ≥0.3µm: no data'))
 
@@ -996,7 +998,7 @@ def generate_dashboard_html(csv_path, output_path):
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light">
 <meta http-equiv="refresh" content="1800">
-<title>Wright Lab ; DUNE High Bay Slow Control</title>
+<title>DUNE CRP Assembly Site Slow Control</title>
 <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
 <style>
   /* ── theme variables — dark (default) ─────────────────────────────────── */
@@ -1072,11 +1074,6 @@ def generate_dashboard_html(csv_path, output_path):
     margin-bottom: 6px;
     line-height: 1.25;
   }}
-  .header h1 .h1-lab {{
-    padding-bottom: 2px;
-    border-bottom: 2px solid rgba(255,255,255,0.35);
-  }}
-  .header h1 .h1-comma {{ color: rgba(255,255,255,0.55); }}
   .header .sub {{
     color: rgba(255,255,255,0.78);
     font-family: Georgia, 'Times New Roman', serif;
@@ -1226,8 +1223,8 @@ def generate_dashboard_html(csv_path, output_path):
 
 <div class="header">
   <div class="header-text">
-    <h1><span class="h1-lab">WRIGHT LAB</span><span class="h1-comma">-</span> DUNE HIGH BAY SLOW CONTROL</h1>
-    <div class="sub">Particulate &amp; Environmental Monitor<span class="sub-sep">&middot;</span>Particles Plus 7301<span class="sub-sep">&middot;</span>CRP Production Area</div>
+    <h1>DUNE CRP ASSEMBLY SITE SLOW CONTROL</h1>
+    <div class="sub">Particulate &amp; Environmental Monitor<span class="sub-sep">&middot;</span>Particles Plus 7301<span class="sub-sep">&middot;</span>CRP Assembly Tent</div>
   </div>
   <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle color theme">
     <span class="tt-light">&#9728;&nbsp; Light</span><span class="tt-dark">&#9790;&nbsp; Dark</span>
@@ -1265,7 +1262,7 @@ def generate_dashboard_html(csv_path, output_path):
   <div class="stat-item"><span class="stat-k">Samples in window</span><span class="stat-v" id="stat-n">--</span></div>
   <div class="stat-item"><span class="stat-k">0.3 &micro;m &mdash; mean</span><span class="stat-v" id="stat-mean1">--</span></div>
   <div class="stat-item"><span class="stat-k">0.3 &micro;m &mdash; peak</span><span class="stat-v" id="stat-peak1">--</span></div>
-  <div class="stat-item"><span class="stat-k">ISO 7 exceedances &nbsp;(0.5 &micro;m &gt; 352k /m&sup3;)</span><span class="stat-v" id="stat-exc7">--</span></div>
+  <div class="stat-item"><span class="stat-k">ISO 8 exceedances &nbsp;(0.5 &micro;m &gt; 3.52M /m&sup3;)</span><span class="stat-v" id="stat-exc7">--</span></div>
   <div class="stat-item"><span class="stat-k">Offline gaps detected</span><span class="stat-v" id="stat-gaps">--</span></div>
 </div>
 

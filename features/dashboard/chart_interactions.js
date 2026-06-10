@@ -155,16 +155,17 @@ function _baseLayout() {
       font: Object.assign({ size: 11 }, t.hoverlabel.font),
     }),
     legend: Object.assign({}, t.legend, {
-      borderwidth: 1, font: { size: 11 },
+      borderwidth: 1,
+      font: { size: 12.5, family: 'Georgia, "Times New Roman", serif' },
       orientation: 'h', yanchor: 'bottom', y: 1.02, x: 0,
     }),
     xaxis: Object.assign({}, t.xaxis, {
-      tickfont:   { color: _themeMuted(), size: 10 },
-      title_font: { color: _themeMuted(), size: 11 },
+      tickfont:   { color: _themeMuted(), size: 12, family: 'Georgia, "Times New Roman", serif' },
+      title_font: { color: _themeMuted(), size: 13.5, family: 'Georgia, "Times New Roman", serif' },
     }),
     yaxis: Object.assign({}, t.yaxis, {
-      tickfont:   { color: _themeMuted(), size: 10 },
-      title_font: { color: _themeMuted(), size: 11 },
+      tickfont:   { color: _themeMuted(), size: 12, family: 'Georgia, "Times New Roman", serif' },
+      title_font: { color: _themeMuted(), size: 13.5, family: 'Georgia, "Times New Roman", serif' },
     }),
   };
 }
@@ -305,7 +306,9 @@ function updateStats(i) {
     ? Math.round(v).toLocaleString() + ' /m³' : '--';
   const mean1 = ch1.length ? ch1.reduce((a, b) => a + b, 0) / ch1.length : null;
   const peak1 = ch1.length ? Math.max(...ch1) : null;
-  const exc7  = ch2.filter(v => v > 352000).length;
+  // Tent target is ISO 8 — exceedance = >= 0.5 µm above the ISO 8 limit
+  // (3,520,000 /m³). Counted on the plotted ≥0.5 µm series.
+  const exc7  = ch2.filter(v => v > 3520000).length;
   const exc7s = ch2.length
     ? exc7 + ' / ' + ch2.length + ' (' + (exc7 / ch2.length * 100).toFixed(0) + '%)'
     : '--';
