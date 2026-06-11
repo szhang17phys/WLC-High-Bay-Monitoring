@@ -57,7 +57,7 @@ function getPlotlyTheme() {
     plot_bgcolor:  isLight ? '#ffffff' : '#0d1117',
     font: {
       color: isLight ? '#1f2328' : '#e6edf3',
-      family: '"Times New Roman", Times, serif',
+      family: 'Arial, "Helvetica Neue", Helvetica, sans-serif',
       size: 12
     },
     xaxis: {
@@ -156,16 +156,16 @@ function _baseLayout() {
     }),
     legend: Object.assign({}, t.legend, {
       borderwidth: 1,
-      font: { size: 12.5, family: '"Times New Roman", Times, serif' },
+      font: { size: 12.5, family: 'Arial, "Helvetica Neue", Helvetica, sans-serif' },
       orientation: 'h', yanchor: 'bottom', y: 1.02, x: 0,
     }),
     xaxis: Object.assign({}, t.xaxis, {
-      tickfont:   { color: _themeMuted(), size: 12, family: '"Times New Roman", Times, serif' },
-      title_font: { color: _themeMuted(), size: 13.5, family: '"Times New Roman", Times, serif' },
+      tickfont:   { color: _themeMuted(), size: 12, family: 'Arial, "Helvetica Neue", Helvetica, sans-serif' },
+      title_font: { color: _themeMuted(), size: 13.5, family: 'Arial, "Helvetica Neue", Helvetica, sans-serif' },
     }),
     yaxis: Object.assign({}, t.yaxis, {
-      tickfont:   { color: _themeMuted(), size: 12, family: '"Times New Roman", Times, serif' },
-      title_font: { color: _themeMuted(), size: 13.5, family: '"Times New Roman", Times, serif' },
+      tickfont:   { color: _themeMuted(), size: 12, family: 'Arial, "Helvetica Neue", Helvetica, sans-serif' },
+      title_font: { color: _themeMuted(), size: 13.5, family: 'Arial, "Helvetica Neue", Helvetica, sans-serif' },
     }),
   };
 }
@@ -295,7 +295,7 @@ function isoAnnotations() {
     xref: 'paper', x: 1.005, yref: 'y', y: Math.log10(l.y),
     text: l.bold ? '<b>' + l.label + '</b>' : l.label,
     showarrow: false, xanchor: 'left',
-    font: { color: _isoColor(l.color), size: l.bold ? 12 : 10, family: '"Times New Roman", Times, serif' },
+    font: { color: _isoColor(l.color), size: l.bold ? 12 : 10, family: 'Arial, "Helvetica Neue", Helvetica, sans-serif' },
   }));
 }
 

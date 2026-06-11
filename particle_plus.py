@@ -28,10 +28,23 @@ PORT         = 502
 
 BASE_DIR         = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR         = f'{BASE_DIR}/data'
-ARCHIVE_CSV      = f'{DATA_DIR}/measurement_archive.csv'  # all data, local only
-LIVE_CSV         = f'{DATA_DIR}/live.csv'                 # 30-day particle window, GitHub
-ENV_SNAPSHOT_CSV = f'{DATA_DIR}/env_live.csv'             # 10s env snapshots, GitHub
-COUNTER_STATE    = f'{DATA_DIR}/counter_state.json'       # tracks last synced record
+
+# The permanent archive (and its sync-state file) lives in the cluster
+# project space when available, so it survives fresh `git clone`s — a new
+# checkout can just run the server against the existing data. Falls back to
+# the repo-local data/ dir where that path doesn't exist (e.g. Mac dev).
+PROJECT_DATA_DIR = '/project/dune/slow_control/particle_plus'
+try:
+    if os.path.isdir(os.path.dirname(PROJECT_DATA_DIR)):
+        os.makedirs(PROJECT_DATA_DIR, exist_ok=True)
+except OSError:
+    pass
+ARCHIVE_DIR      = PROJECT_DATA_DIR if os.path.isdir(PROJECT_DATA_DIR) else DATA_DIR
+
+ARCHIVE_CSV      = f'{ARCHIVE_DIR}/measurement_archive.csv'   # all data, never in git
+LIVE_CSV         = f'{DATA_DIR}/live.csv'                     # 30-day particle window, GitHub
+ENV_SNAPSHOT_CSV = f'{DATA_DIR}/env_live.csv'                 # 10s env snapshots, GitHub
+COUNTER_STATE    = f'{ARCHIVE_DIR}/counter_state.json'        # tracks last synced record
 SESSION_FILE     = f'{DATA_DIR}/session_baseline.txt'
 LOG_FILE         = f'{BASE_DIR}/sync_log.txt'
 PID_FILE         = f'{BASE_DIR}/particle_plus.pid'
@@ -1144,7 +1157,7 @@ def generate_dashboard_html(csv_path, output_path, days=30, env_days=8,
   body {{
     background: var(--bg-primary);
     color: var(--text-primary);
-    font-family: "Times New Roman", Times, serif;
+    font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
     padding: 20px 28px 40px;
     min-height: 100vh;
     transition: background-color 0.2s ease, color 0.2s ease;
@@ -1166,7 +1179,7 @@ def generate_dashboard_html(csv_path, output_path, days=30, env_days=8,
   }}
   .header h1 {{
     color: #ffffff;
-    font-family: 'Times New Roman', Times, serif;
+    font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
     font-size: 21px;
     letter-spacing: 0.1em;
     font-weight: normal;
@@ -1175,7 +1188,7 @@ def generate_dashboard_html(csv_path, output_path, days=30, env_days=8,
   }}
   .header .sub {{
     color: rgba(255,255,255,0.78);
-    font-family: 'Times New Roman', Times, serif;
+    font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
     font-style: italic;
     font-size: 12.5px;
     letter-spacing: 0.06em;
@@ -1726,13 +1739,16 @@ def mode_all():
     Recommended for the tmux session on noether.
     """
     import threading
-    from features.data_manager import migrate_old_files, rebuild_live_csv, trim_env_csv
+    from features.data_manager import (migrate_old_files, migrate_archive_dir,
+                                       rebuild_live_csv, trim_env_csv)
 
     log("MODE: --all  (sample + live + dashboard)")
 
     # ── one-time migration from legacy file names ─────────────────────────────
     migrate_old_files(DATA_DIR)
-    log("Data file migration check complete")
+    # one-time copy of the archive + sync state into the project space
+    migrate_archive_dir(DATA_DIR, ARCHIVE_DIR)
+    log(f"Data file migration check complete (archive dir: {ARCHIVE_DIR})")
 
     # ── rebuild live.csv from archive at startup ──────────────────────────────
     if os.path.exists(ARCHIVE_CSV):

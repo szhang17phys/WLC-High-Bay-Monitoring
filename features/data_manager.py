@@ -165,6 +165,21 @@ def migrate_old_files(data_dir):
     )
 
 
+def migrate_archive_dir(data_dir, archive_dir):
+    """
+    One-time copy of the permanent archive (+ its sync-state file) from the
+    repo-local data/ dir into the shared project space. Safe to call at every
+    startup — only copies files the destination doesn't have yet. The
+    originals are left behind in data/ as a backup (gitignored, never read
+    again once the project-space copies exist).
+    """
+    if os.path.abspath(archive_dir) == os.path.abspath(data_dir):
+        return
+    for name in ('measurement_archive.csv', 'counter_state.json'):
+        _safe_copy(os.path.join(data_dir, name),
+                   os.path.join(archive_dir, name))
+
+
 def _safe_copy(src, dst):
     """Copy src → dst only if src exists and dst does not."""
     if os.path.exists(src) and not os.path.exists(dst):
