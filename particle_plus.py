@@ -1419,7 +1419,7 @@ def generate_dashboard_html(csv_path, output_path, days=30, env_days=8,
 
 <div class="row2">
   <div class="chart-panel">
-    <div class="chart-title">Latest Particle Size Distribution &nbsp;(most recent sample &mdash; log scale)</div>
+    <div class="chart-title">Raw Particle Counts by Size &nbsp;(sample at {last_ts} &mdash; log scale)</div>
     <div id="chart-dist" style="height:280px"></div>
   </div>
   <div class="chart-panel">
