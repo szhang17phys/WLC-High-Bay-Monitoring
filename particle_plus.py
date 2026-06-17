@@ -51,7 +51,7 @@ PID_FILE         = f'{BASE_DIR}/particle_plus.pid'
 
 # sampling schedule
 SAMPLE_TIME_S       = 60      # 1 minute sample
-HOLD_TIME_S         = 240     # 4 min between samples = ~15 per hour
+HOLD_TIME_S         = 60     # 4 min between samples = ~15 per hour
 DELAY_TIME_S        = 5       # pump stabilization
 CYCLES              = 1       # 1 sample per cycle then hold
 
