@@ -683,10 +683,30 @@ function _saveTimeRange() {
   } catch (e) { /* ignore */ }
 }
 
+function _restoreBinSize() {
+  try {
+    var saved = sessionStorage.getItem('wlc-bin');
+    if (saved === null) return;
+    var sel = document.getElementById('sel-bin');
+    if (!sel) return;
+    for (var i = 0; i < sel.options.length; i++) {
+      if (sel.options[i].value === saved) { sel.selectedIndex = i; break; }
+    }
+  } catch (e) { /* sessionStorage unavailable → keep the default bin */ }
+}
+
+function _saveBinSize() {
+  try {
+    var sel = document.getElementById('sel-bin');
+    if (sel) sessionStorage.setItem('wlc-bin', sel.value);
+  } catch (e) { /* ignore */ }
+}
+
 function _refreshNow() {
   var btn = document.getElementById('wlc-refresh-btn');
   if (btn) btn.classList.add('spinning');   // brief spin so the reload feels intentional
   _saveTimeRange();
+  _saveBinSize();
   if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer = null; }
   setTimeout(function () { window.location.reload(); }, 450);
 }
@@ -782,7 +802,12 @@ function _attachBinControl() {
       '<option value="60">1 hr</option>' +
     '</select>';
   rangeGroup.parentNode.insertBefore(group, rangeGroup.nextSibling);
-  document.getElementById('sel-bin').addEventListener('change', filterAndRender);
+  var binSel = document.getElementById('sel-bin');
+  binSel.addEventListener('change', function() {
+    _saveBinSize();
+    filterAndRender();
+  });
+  _restoreBinSize();  // restore saved bin size after creating the dropdown
 }
 
 // ── Theme toggle ──────────────────────────────────────────────────────────────
@@ -821,7 +846,10 @@ window._attachZoomOutButtonListeners();
 _attachThemeToggle();
 // Inject the refresh control and start the 60 s auto-refresh.
 _attachRefreshControl();
-window.addEventListener('beforeunload', _saveTimeRange);
+window.addEventListener('beforeunload', function() {
+  _saveTimeRange();
+  _saveBinSize();
+});
 _refreshTimer = setInterval(_autoRefreshTick, AUTO_REFRESH_MS);
 
 document.addEventListener('click', function (e) {
