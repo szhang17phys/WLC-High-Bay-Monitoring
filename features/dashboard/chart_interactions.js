@@ -369,6 +369,7 @@ function filterAndRender() {
         autorange:  false,
         range:      COUNTS_Y_RANGE,
         fixedrange: true,
+        dtick:      1,  // One tick per order of magnitude (10^0, 10^1, 10^2, ...)
       }),
       xaxis:       Object.assign({}, DARK.xaxis, { title: '' }, xBounds, xRange),
       margin:      { l: 60, r: 72, t: 30, b: 50 },
@@ -415,6 +416,7 @@ function filterAndRender() {
         range:      [-0.5, _distLogMax],
         autorange:  false,
         fixedrange: true,
+        dtick:      1,  // One tick per order of magnitude
       }),
       xaxis: Object.assign({}, DARK.xaxis, {
         title:      'Particle Size (μm)',

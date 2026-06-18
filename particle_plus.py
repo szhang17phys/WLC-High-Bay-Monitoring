@@ -623,10 +623,16 @@ def generate_dashboard_html(csv_path, output_path, days=30, env_days=8,
         sz = sf(ref.get(f'ch{i}_size_um'))
         ch_sizes[i] = f'{sz:.1f}' if sz is not None else str(i)
 
+    # Replace zeros with None for log-scale plots (log(0) is undefined)
     ch_counts = {i: [sf(r.get(f'ch{i}_diff_m3')) if r is not None else None
                      for r in _plot_records] for i in range(1, 7)}
-    ch_pm     = {i: [sf(r.get(f'ch{i}_pm_ugm3'))     if r is not None else None
+    ch_counts = {i: [v if v and v > 0 else None for v in vals]
+                 for i, vals in ch_counts.items()}
+
+    ch_pm     = {i: [sf(r.get(f'ch{i}_pm_ugm3')) if r is not None else None
                      for r in _plot_records] for i in range(1, 7)}
+    ch_pm     = {i: [v if v and v > 0 else None for v in vals]
+                 for i, vals in ch_pm.items()}
     flow_vals = [sf(r.get('flow_CFM')) if r is not None else None for r in _plot_records]
 
     # ── env snapshot CSV: counter only stores temp/RH in the live reading (record 0),
@@ -1120,7 +1126,7 @@ def generate_dashboard_html(csv_path, output_path, days=30, env_days=8,
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light">
 <meta http-equiv="refresh" content="1800">
-<title>DUNE CRP Assembly Site Slow Control</title>
+<title>DUNE CRP Assembly Site {'Slow Control' if local else 'Dashboard'}</title>
 <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
 <style>
   /* ── theme variables — dark (default) ─────────────────────────────────── */
@@ -1384,7 +1390,7 @@ def generate_dashboard_html(csv_path, output_path, days=30, env_days=8,
 
 <div class="header">
   <div class="header-text">
-    <h1>DUNE CRP ASSEMBLY SITE SLOW CONTROL{local_badge_html}</h1>
+    <h1>DUNE CRP ASSEMBLY SITE {'SLOW CONTROL' if local else 'DASHBOARD'}{local_badge_html}</h1>
     <div class="sub">Particulate &amp; Environmental Monitor<span class="sub-sep">&middot;</span>Particles Plus 7301<span class="sub-sep">&middot;</span>CRP Assembly Tent</div>
   </div>
   <div class="controls">
