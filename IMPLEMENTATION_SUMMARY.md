@@ -6,7 +6,7 @@
 - **Status:** ✓ Complete
 - **Files:** 
   - `features/dashboard/chart_interactions_local.js` (+150 lines)
-  - `particle_plus.py` (+45 lines for modal HTML)
+  - `particle_plus.py` (+45 lines for modal HTML, time range options)
 - **Functionality:**
   - "Custom..." option in Time Range dropdown (local version only)
   - Modal dialog with value + unit (minutes/hours/days) inputs
@@ -14,6 +14,8 @@
   - Persists across page reloads (sessionStorage)
   - Dynamically adds custom option to dropdown
   - Enter key to apply, Escape/Cancel to dismiss
+- **Local Time Ranges:** 30min, 1hr, 6hr, 24hr, 2d, 3d, 7d, All data, Custom...
+- **Public Time Ranges:** 30min, 1hr, 2hr, 3hr, 6hr, 12hr, 24hr, 2d, 3d, 7d (more granular)
 
 ### **Feature 2: Dynamic PM Mass Log Scale (LOCAL ONLY)**
 - **Status:** ✓ Complete

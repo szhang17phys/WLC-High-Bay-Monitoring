@@ -827,16 +827,27 @@ def generate_dashboard_html(csv_path, output_path, days=30, env_days=8,
     # The local (noether-only) dashboard gets extended ranges over the full
     # archive; value is the window in minutes, 0 = no cutoff ("All data" —
     # sliceIdxForArray() in chart_interactions.js treats 0 as "from start").
-    _ranges = [
-        (30, 'Last 30 min'), (60, 'Last 1 hr'), (120, 'Last 2 hr'),
-        (180, 'Last 3 hr'), (360, 'Last 6 hr'), (720, 'Last 12 hr'),
-        (1440, 'Last 24 hr'), (2880, 'Last 2 days'), (4320, 'Last 3 days'),
-        (10080, 'Last 7 days'),
-    ]
     if local:
-        _ranges += [(20160, 'Last 14 days'), (43200, 'Last 30 days'),
-                    (129600, 'Last 90 days'), (0, 'All data'),
-                    (-1, 'Custom...')]  # Custom range option for local only
+        # Local version: cleaner progression up to 7 days, then All/Custom
+        _ranges = [
+            (30, 'Last 30 min'),
+            (60, 'Last 1 hr'),
+            (360, 'Last 6 hr'),
+            (1440, 'Last 24 hr'),
+            (2880, 'Last 2 days'),
+            (4320, 'Last 3 days'),
+            (10080, 'Last 7 days'),
+            (0, 'All data'),
+            (-1, 'Custom...'),
+        ]
+    else:
+        # Public version: includes intermediate steps (2hr, 3hr, 12hr)
+        _ranges = [
+            (30, 'Last 30 min'), (60, 'Last 1 hr'), (120, 'Last 2 hr'),
+            (180, 'Last 3 hr'), (360, 'Last 6 hr'), (720, 'Last 12 hr'),
+            (1440, 'Last 24 hr'), (2880, 'Last 2 days'), (4320, 'Last 3 days'),
+            (10080, 'Last 7 days'),
+        ]
     range_options_html = ''.join(
         f'<option value="{v}"{" selected" if v == 1440 else ""}>{lab}</option>'
         for v, lab in _ranges)
