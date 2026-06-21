@@ -17,7 +17,7 @@ paths:
 
 sampling:
   sample_time_s: 60      # Sample integration time (seconds)
-  hold_time_s: 0         # Pause between samples (0 = continuous)
+  hold_time_s: 60         # Pause between samples (0 = continuous)
   delay_time_s: 5        # Pump stabilization delay
   cycles: 0              # 1 sample per cycle then hold
 
