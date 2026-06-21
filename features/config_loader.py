@@ -66,7 +66,7 @@ def get_default_config():
             'trim_cap': 20000,
         },
         'github': {
-            'enabled': True,
+            'enabled': False,  # Safe default: monitoring only (no auto-push)
             'repo_dir': None,  # None = use BASE_DIR
             'branch': 'main',
             'remote': 'origin',

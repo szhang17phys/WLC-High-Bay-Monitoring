@@ -81,6 +81,9 @@ MIN_RECORDS_TO_SYNC = _cfg('sync', 'min_records_to_sync', 1)
 TRIM_CAP            = _cfg('sync', 'trim_cap', 20000)
 
 # github — repo root = BASE_DIR so index.html lands at root (GitHub Pages)
+# IMPORTANT: GITHUB_ENABLED defaults to FALSE for safety (monitoring only)
+# Set to true in config.local.yaml ONLY if you want auto-push to GitHub Pages
+GITHUB_ENABLED      = _cfg('github', 'enabled', False)
 GITHUB_REPO_DIR     = _cfg('github', 'repo_dir', None) or BASE_DIR
 GITHUB_BRANCH       = _cfg('github', 'branch', 'main')
 GITHUB_REMOTE       = _cfg('github', 'remote', 'origin')
@@ -1559,8 +1562,21 @@ def push_to_github(repo_dir, csv_path):
     Copy CSV + generated HTML into the repo, commit, and push.
     Requires the repo to already be cloned and have push access
     via SSH key or token.
+
+    If GITHUB_ENABLED is False, only generates HTML locally without git push.
+    This is the safe default for new installations.
     """
     import shutil
+
+    # Check if GitHub push is enabled
+    if not GITHUB_ENABLED:
+        log("GitHub push disabled (monitoring only mode)")
+        log("  → Dashboard HTML generated locally, no git push")
+        log("  → To enable: set github.enabled=true in config.local.yaml")
+        # Still generate HTML locally (useful for debugging)
+        html_path = os.path.join(repo_dir, 'index.html')
+        generate_dashboard_html(csv_path, html_path)
+        return True
 
     html_path = os.path.join(repo_dir, 'index.html')
     csv_dest  = os.path.join(repo_dir, 'data', 'live.csv')
@@ -1676,7 +1692,10 @@ def mode_sample():
         log(f"  Sampling every {HOLD_TIME_S}s")
     else:
         log(f"  Sampling every {HOLD_TIME_S}s ({HOLD_TIME_S//60} min)")
-    log(f"  GitHub push interval: {GITHUB_PUSH_INTERVAL_S}s ({GITHUB_PUSH_INTERVAL_S//60} min)" if GITHUB_PUSH_INTERVAL_S > 0 else "  GitHub push: after every sample")
+    if GITHUB_ENABLED:
+        log(f"  GitHub push: ENABLED (interval: {GITHUB_PUSH_INTERVAL_S}s / {GITHUB_PUSH_INTERVAL_S//60} min)" if GITHUB_PUSH_INTERVAL_S > 0 else "  GitHub push: ENABLED (after every sample)")
+    else:
+        log(f"  GitHub push: DISABLED (monitoring only)")
     log(f"  Background processing: enabled (heavy tasks during counting phase)")
     log("="*55)
 
@@ -1925,8 +1944,15 @@ def mode_trim():
 
 
 def mode_dashboard():
-    """Generate HTML and push to GitHub Pages"""
-    log("MODE: --dashboard")
+    """Generate HTML and push to GitHub Pages (if enabled)"""
+    if not GITHUB_ENABLED:
+        log("MODE: --dashboard (GitHub push disabled)")
+        log("  Generating dashboard HTML locally only")
+        log("  To enable GitHub push: set github.enabled=true in config.local.yaml")
+        generate_dashboard_html(LIVE_CSV, os.path.join(GITHUB_REPO_DIR, 'index.html'))
+        return
+
+    log("MODE: --dashboard (GitHub push enabled)")
     push_to_github(GITHUB_REPO_DIR, LIVE_CSV)
 
 
@@ -1940,6 +1966,11 @@ def mode_all():
                                        rebuild_live_csv, trim_env_csv)
 
     log("MODE: --all  (sample + live + dashboard)")
+    if GITHUB_ENABLED:
+        log(f"  GitHub push: ENABLED → {GITHUB_REPO_DIR}")
+    else:
+        log(f"  GitHub push: DISABLED (monitoring only)")
+        log(f"  To enable: set github.enabled=true in config.local.yaml")
 
     # ── one-time migration from legacy file names ─────────────────────────────
     migrate_old_files(DATA_DIR)

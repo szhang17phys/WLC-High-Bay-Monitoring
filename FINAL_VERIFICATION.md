@@ -54,23 +54,32 @@ All three features successfully implemented with your exact specifications.
 
 ## ✅ Feature 3: Configuration System (BOTH)
 
+### ⚠️ CRITICAL: GitHub Push Safety Feature
+
+**GitHub push is now DISABLED by default** for safety and replicability!
+
 **Files Created:**
-- ✓ `config.yaml` (example with all defaults)
+- ✓ `config.yaml` (example with **github.enabled: false**)
 - ✓ `features/config_loader.py` (YAML loader)
 - ✓ `requirements.txt` (added pyyaml>=6.0)
 - ✓ `.gitignore` (added config.local.yaml)
+- ✓ `GITHUB_PUSH_SETUP.md` (full GitHub configuration guide)
+- ✓ `config.local.yaml` (YOUR setup with enabled: true, gitignored)
 
 **Backwards Compatibility:**
-- ✓ Works without config files (uses hardcoded defaults)
-- ✓ Works without pyyaml installed (prints warning, uses defaults)
-- ✓ Fallback chain: config.local.yaml → config.yaml → hardcoded
+- ✓ Works without config files (uses hardcoded defaults, github: false)
+- ✓ Works without pyyaml installed (prints warning, uses safe defaults)
+- ✓ Fallback chain: config.local.yaml → config.yaml → hardcoded (all default to false)
 
 **Config Sections:**
 - counter (ip, port, password)
 - paths (project_data_dir)
 - sampling (sample_time_s, hold_time_s, etc.)
 - sync (erase_after_sync, trim_cap)
-- github (branch, remote, push_interval_s)
+- **github (enabled=FALSE by default!)** ⚠️ SAFETY FEATURE
+  - New users won't push to your GitHub
+  - Must opt-in via config.local.yaml
+  - See GITHUB_PUSH_SETUP.md
 - thresholds (temp/RH limits for display)
 - metadata (institution, location)
 
@@ -79,9 +88,11 @@ All three features successfully implemented with your exact specifications.
 ## 🔒 Code Impact
 
 ### particle_plus.py (24/7 daemon)
-- **Lines added:** ~70 total
-- **All optional:** Try/except wrappers, graceful fallbacks
-- **Stability:** HIGH - fallbacks ensure daemon never breaks
+- **Lines added:** ~100 total
+- **Config loading:** ~30 lines (optional, with fallbacks)
+- **GitHub safety:** ~30 lines (GITHUB_ENABLED checks)
+- **Dashboard features:** ~40 lines (modal HTML, JS selector)
+- **Stability:** HIGH - all optional with graceful fallbacks
 
 ### chart_interactions.js (public)
 - **Lines changed:** 0 ✓
@@ -97,14 +108,16 @@ All three features successfully implemented with your exact specifications.
 
 | File | Status | Purpose |
 |------|--------|---------|
-| `particle_plus.py` | Modified (+70) | Config loading + modal HTML + JS selector |
+| `particle_plus.py` | Modified (+100) | Config + GitHub safety + modal HTML + JS selector |
 | `chart_interactions.js` | Unchanged | Public dashboard (original) |
 | `chart_interactions_local.js` | New (+170) | Local dashboard (with features) |
-| `config.yaml` | New | Example configuration |
+| `config.yaml` | New | Example config (github: false) |
+| `config.local.yaml` | New | Your setup (github: true, gitignored) |
 | `config_loader.py` | New | YAML loader with fallbacks |
 | `requirements.txt` | Modified (+1) | Added pyyaml |
 | `.gitignore` | Modified (+3) | Added config.local.yaml |
 | `IMPLEMENTATION_SUMMARY.md` | New | Full documentation |
+| `GITHUB_PUSH_SETUP.md` | New | GitHub safety guide |
 
 ---
 
@@ -157,6 +170,8 @@ python3 particle_plus.py --all
 
 1. ✅ **Local version has clean time ranges** (30min, 1hr, 6hr, 24hr, 2d, 3d, 7d, All, Custom)
 2. ✅ **Public version unchanged** (original code intact)
+3. ✅ **GitHub push DISABLED by default** (safe for new users!)
+4. ✅ **Easy to enable GitHub** (one line in config.local.yaml)
 3. ✅ **Custom range modal** (local only, any value in min/hr/days)
 4. ✅ **PM log scale** (local only, dynamic range)
 5. ✅ **Config system** (optional, backwards compatible)

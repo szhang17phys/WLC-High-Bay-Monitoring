@@ -178,12 +178,16 @@ The default configuration assumes no admin password is set (`COUNTER_PASSWORD = 
 
 - Python 3.8 or newer
 - `pymodbus >= 3.5`
-- Git with push access to the repository (SSH key or token configured on the host)
 - Counter reachable at its configured IP address on port 502
+- **Optional:** `pyyaml >= 6.0` (for config file support)
+- **Optional:** Git with push access (only if you want GitHub Pages auto-push)
 
 ```bash
-pip install pymodbus>=3.5
+pip install -r requirements.txt
+# Or minimal: pip install pymodbus>=3.5
 ```
+
+**Important:** By default, the system runs in **monitoring-only mode** (no GitHub push). This is safe for new installations. See [GITHUB_PUSH_SETUP.md](GITHUB_PUSH_SETUP.md) to enable GitHub Pages integration.
 
 ### Deployment on noether
 
@@ -203,16 +207,29 @@ python3 particle_plus.py --all
 
 ### Adapting to a Different Instrument or Location
 
-Edit the configuration block at the top of `particle_plus.py`:
+**Recommended:** Use configuration files (easier, cleaner):
 
-```python
-COUNTER_IP          = '10.66.66.68'   # Modbus TCP address of the counter
-PORT                = 502              # Modbus TCP port
-HOLD_TIME_S         = 1800             # seconds between samples (30 min)
-SAMPLE_TIME_S       = 60               # sample integration time (1 min)
-COUNTER_PASSWORD    = ''               # admin password for clock sync writes
-GITHUB_REPO_DIR     = '/home/rraut/particle_plus'  # local git repo path
-```
+1. Copy the example config:
+   ```bash
+   cp config.yaml config.local.yaml
+   ```
+
+2. Edit `config.local.yaml` with your settings:
+   ```yaml
+   counter:
+     ip: '10.66.66.68'      # Your counter's IP
+     port: 502
+   
+   github:
+     enabled: false         # Set true only if you want GitHub Pages push
+   ```
+
+3. Run the system:
+   ```bash
+   python3 particle_plus.py --all
+   ```
+
+**Alternative:** Edit `particle_plus.py` directly (lines 26-95), but config files are preferred for replicability.
 
 ---
 

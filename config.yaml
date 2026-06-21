@@ -23,7 +23,8 @@ sync:
   trim_cap: 20000            # Auto-erase when counter exceeds this many records
 
 github:
-  enabled: true
+  enabled: false             # IMPORTANT: Set to true only if you want auto-push to GitHub Pages
+                             # Default false = safe for new installations (monitoring only)
   repo_dir: null             # null = use BASE_DIR (repo root)
   branch: 'main'
   remote: 'origin'
