@@ -1787,11 +1787,16 @@ def mode_sync(client=None):
         total = get_record_count(client)
         log(f"Records on counter: {total}")
 
-        # ── determine last synced record ──────────────────────────────────────
+        # ── determine last synced record with cross-validation ────────────────
         # Prefer counter_state.json (written after every sync + after every erase).
         # Fall back to scanning the archive CSV only on first run before state file exists.
+        # CRITICAL: Cross-validate record numbers with timestamps to prevent:
+        #   1. Duplicate data if state file is corrupted
+        #   2. Stale data if counter was manually reset but state wasn't
         from features.data_manager import (get_last_synced, set_last_synced,
-                                            rebuild_live_csv)
+                                            rebuild_live_csv, get_archive_last_timestamp)
+
+        # Get last synced record number from state file
         if os.path.exists(COUNTER_STATE):
             last_saved = get_last_synced(COUNTER_STATE)
         else:
@@ -1805,6 +1810,16 @@ def mode_sync(client=None):
                                 last_saved = n
                         except (ValueError, TypeError):
                             pass
+
+        # Cross-validate: get timestamp of last archived record
+        archive_last_rec, archive_last_ts = get_archive_last_timestamp(ARCHIVE_CSV)
+
+        # Safety check: If archive says it has more records than state file claims,
+        # trust the archive (state file might be corrupted/stale)
+        if archive_last_rec > last_saved:
+            log(f"Sync state mismatch detected: state says {last_saved}, "
+                f"archive has record {archive_last_rec}. Using archive value.", 'WARN')
+            last_saved = archive_last_rec
 
         # ── detect counter erase / reset ─────────────────────────────────────
         # If the counter has fewer records than our last synced number, the counter
@@ -1849,6 +1864,30 @@ def mode_sync(client=None):
             except Exception as e:
                 log(f"  [{i:4d}/{total}] Error: {e}", 'ERROR')
                 failed.append(i)
+
+        # ── validate timestamps before saving ────────────────────────────────
+        # Detect if new data is older than archive (stale counter data)
+        if archive_last_ts and records:
+            # Parse timestamp from first new record
+            first_new = records[0]
+            new_ts = None
+            d = first_new.get('date', '').strip()
+            t = first_new.get('time', '').strip()
+            if d and t:
+                try:
+                    from datetime import datetime as dt_parse
+                    new_ts = dt_parse.strptime(f"{d} {t}", '%Y-%m-%d %H:%M:%S')
+                except ValueError:
+                    pass
+
+            # If we can parse timestamps, verify new data is newer than archive
+            if new_ts and new_ts < archive_last_ts:
+                log(f"CRITICAL: New data timestamp ({d} {t}) is OLDER than archive "
+                    f"last timestamp ({archive_last_ts.strftime('%Y-%m-%d %H:%M:%S')})", 'ERROR')
+                log(f"This suggests counter has stale data or was manually reset.", 'ERROR')
+                log(f"Refusing to save {len(records)} stale records to prevent data corruption.", 'ERROR')
+                log(f"Recommended action: Erase counter manually with force_erase.py", 'ERROR')
+                return False
 
         # ── save to archive (never trimmed) ──────────────────────────────────
         saved = save_to_csv(records, ARCHIVE_CSV)

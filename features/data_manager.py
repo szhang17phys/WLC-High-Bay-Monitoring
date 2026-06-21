@@ -63,6 +63,51 @@ def reset_sync_state(state_path):
         json.dump({'last_synced': 0, 'erased': datetime.now().isoformat()}, f)
 
 
+def get_archive_last_timestamp(archive_path):
+    """
+    Get the timestamp of the last record in the archive.
+    Returns (record_number, datetime) or (0, None) if archive doesn't exist or is empty.
+    Used for cross-validation with record numbers to prevent duplicate/stale data.
+    """
+    if not os.path.exists(archive_path):
+        return (0, None)
+
+    try:
+        # Read last 8KB of file to get the last record efficiently
+        with open(archive_path, 'rb') as f:
+            f.seek(0, 2)  # Go to end
+            size = f.tell()
+            if size == 0:
+                return (0, None)
+
+            # Read last chunk
+            chunk_size = min(8192, size)
+            f.seek(max(0, size - chunk_size))
+            tail = f.read().decode('utf-8', 'replace').strip().splitlines()
+
+        if len(tail) < 2:  # Need header + at least one data row
+            return (0, None)
+
+        # Parse last row
+        header = tail[0] if not tail[0].startswith('record_number') else None
+        if header is None:
+            # First line is header, use it
+            with open(archive_path, 'r') as f:
+                header = f.readline().strip()
+
+        last_row = tail[-1]
+        reader = csv.DictReader([header, last_row])
+        row = next(reader)
+
+        record_num = int(float(row.get('record_number', 0) or 0))
+        timestamp = _parse_row_ts(row)
+
+        return (record_num, timestamp)
+
+    except Exception:
+        return (0, None)
+
+
 # ─── TIMESTAMP PARSING ────────────────────────────────────────────────────────
 
 def _parse_row_ts(row):
