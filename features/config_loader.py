@@ -52,7 +52,7 @@ def get_default_config():
             'password': '',
         },
         'paths': {
-            'project_data_dir': '/project/dune/slow_control/particle_plus',
+            'project_data_dir': './data',  # Safe default: use local repo directory
         },
         'sampling': {
             'sample_time_s': 60,

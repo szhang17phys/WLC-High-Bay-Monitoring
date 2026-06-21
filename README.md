@@ -6,6 +6,33 @@ Continuous airborne particle monitoring system for the Wright Lab DUNE High Bay 
 
 ---
 
+## 🚀 Quick Start (New Installations)
+
+**Just cloned/forked this repo? Run the setup script:**
+
+```bash
+chmod +x setup.sh
+./setup.sh
+```
+
+The script will:
+- ✅ Check Python version
+- ✅ Install dependencies (pymodbus, pyyaml)
+- ✅ Configure your particle counter IP
+- ✅ Test counter connectivity
+- ✅ Create config.local.yaml
+- ✅ Set up data directories
+- ✅ Verify installation
+
+**Then start monitoring:**
+```bash
+python3 particle_plus.py --all
+```
+
+**That's it!** See [Setup and Installation](#setup-and-installation) below for manual setup or troubleshooting.
+
+---
+
 ## Scientific Background
 
 Particle contamination control is a critical requirement for the construction and assembly of DUNE detector components. Airborne particulate matter can deposit onto sensitive detector surfaces during fabrication, potentially degrading performance. This system provides continuous, automated monitoring of the High Bay clean room environment to verify compliance with the specified ISO 14644-1 cleanliness class and to generate a persistent, time-stamped record of environmental conditions throughout detector assembly activities.
