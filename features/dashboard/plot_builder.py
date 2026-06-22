@@ -27,6 +27,8 @@ def build_series_traces(timestamps, channel_values, names, colors,
             'x': timestamps, 'y': y, 'name': name,
             'type': 'scatter', 'mode': 'lines',
             'line': {'color': color, 'width': width, 'shape': shape},
+            'showlegend': True,  # Always show in legend even if all values are null
+            'visible': True,     # Always render trace (Plotly may hide if all-null without this)
         }
         for y, name, color in zip(channel_values, names, colors)
     ]
