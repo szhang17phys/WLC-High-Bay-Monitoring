@@ -1,6 +1,10 @@
 # WLC High Bay Clean Room Particle Monitor
 
-Continuous airborne particle monitoring system for the Wright Lab DUNE High Bay clean room (Yale University). Data are acquired from a **Particles Plus Model 7301** optical particle counter via Modbus TCP, logged to CSV, and published as a live web dashboard on GitHub Pages after every sample cycle.
+Continuous airborne particle monitoring system initiallyfor the Wright Lab DUNE High Bay clean room (Yale University). 
+
+[Shu] Now (since Jun 25, 2026) the module was modified to adapt to the environment in IU CRP Factory.
+
+Data are acquired from a **Particles Plus Model 7301** optical particle counter via Modbus TCP, logged to CSV, and published as a live web dashboard on GitHub Pages after every sample cycle.
 
 **Live dashboard:** https://rohit-raut.github.io/WLC-High-Bay-Monitoring/
 
@@ -28,6 +32,12 @@ The script will:
 ```bash
 python3 particle_plus.py --all
 ```
+
+[Shu] If the module is installed and operated in conda env, do
+```bash
+python particle_plus.py --all
+```
+
 
 **That's it!** See [Setup and Installation](#setup-and-installation) below for manual setup or troubleshooting.
 
