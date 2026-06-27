@@ -18,6 +18,7 @@ import signal
 import socket
 import subprocess
 from datetime import datetime, timedelta
+from tkinter import font
 
 from pymodbus.client import ModbusTcpClient
 
@@ -1433,14 +1434,19 @@ def generate_dashboard_html(csv_path, output_path, days=30, env_days=8,
   .stat-v.ok {{ color: var(--status-ok); }}
   .stat-v.warn {{ color: var(--status-warn); }}
   .stat-v.alert {{ color: var(--status-fault); }}
-  .notif-wrap {{ position: relative; align-self: flex-end; margin-bottom: 6px; }}
+  .notif-wrap {{ position: relative; align-self: center; margin-bottom: 0; }}
   .notif-btn {{
-    background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 6px;
-    color: var(--text-secondary); font-family: inherit; font-size: 11px; letter-spacing: 1.5px;
-    text-transform: uppercase; padding: 5px 14px; cursor: pointer; white-space: nowrap;
+    background: var(--bg-card); border: 2px solid var(--border-color); border-radius: 10px;
+    color: var(--text-secondary); font-family: inherit; font-size: 17px; font-weight: 600; letter-spacing: 1.5px;
+    text-transform: uppercase; padding: 9px 22px; cursor: pointer; white-space: nowrap;
     transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
   }}
   .notif-btn:hover {{ border-color: var(--accent-yale-light); color: var(--text-accent); }}
+
+  .notif-btn .status-fault,
+  .notif-btn .status-warn,
+  .notif-btn .status-ok { font-size: 1.3em; margin-left: 8px; vertical-align: middle; }
+
   .notif-drop {{
     display: none; position: absolute; right: 0; top: calc(100% + 6px);
     min-width: 340px; max-width: 440px;
@@ -1452,9 +1458,9 @@ def generate_dashboard_html(csv_path, output_path, days=30, env_days=8,
   }}
   .notif-drop.open {{ display: flex; }}
   .notif-hdr {{
-    color: var(--text-secondary); font-size: 12px; text-transform: uppercase;
-    letter-spacing: 1.8px; padding-bottom: 6px;
-    border-bottom: 1px solid var(--border-color); margin-bottom: 4px;
+    color: var(--text-secondary); font-size: 14px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 2px; padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color); margin-bottom: 6px;
   }}
   .notif-row {{ font-size: 15px; line-height: 1.7; }}
   .ni-ok    {{ color: var(--status-ok); }}
