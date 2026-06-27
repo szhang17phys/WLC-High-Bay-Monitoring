@@ -1472,19 +1472,21 @@ def generate_dashboard_html(csv_path, output_path, days=30, env_days=8,
   .notif-btn {{
     background: var(--bg-card);
     border: 2px solid var(--border-color);
-    border-radius: 9px;
+    border-radius: 8px;
     color: var(--text-secondary);
     font-family: inherit;
-    font-size: 16px;
-    font-weight: 600;
-    letter-spacing: 1.5px;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 1.6px;
     text-transform: uppercase;
-    padding: 6px 16px;
+    padding: 5px 14px;
     cursor: pointer;
     white-space: nowrap;
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
+    line-height: 1;
+    height: 32px;
     transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
   }}
 
@@ -1492,7 +1494,7 @@ def generate_dashboard_html(csv_path, output_path, days=30, env_days=8,
 
   .notif-btn .status-fault,
   .notif-btn .status-warn,
-  .notif-btn .status-ok {{ font-size: 1.45em; line-height: 1; margin-left: 4px; display: inline-flex; align-items: center; }}
+  .notif-btn .status-ok {{ font-size: 24px; line-height: 1; margin-left: 2px; display: inline-flex; align-items: center; }}
 
   .notif-drop {{
     display: none; position: absolute; right: 0; top: calc(100% + 6px);
