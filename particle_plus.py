@@ -1493,8 +1493,8 @@ def generate_dashboard_html(csv_path, output_path, days=30, env_days=8,
   .notif-btn:hover {{ border-color: var(--accent-iu-light); color: var(--text-accent); }}
 
   .notif-btn .status-dot {{
-    width: 13px;
-    height: 13px;
+    width: 17px;
+    height: 17px;
 
     border-radius: 50%;
     display: inline-block;
@@ -1502,7 +1502,9 @@ def generate_dashboard_html(csv_path, output_path, days=30, env_days=8,
     margin-left: 6px;
 
     position: relative;
-    top: -1px;          /* fine tuning */
+    top: -2px;          /* fine tuning */
+
+    flex-shrink: 0;
   }}
 
   .notif-btn .status-fault {{ background: var(--status-fault); }}
