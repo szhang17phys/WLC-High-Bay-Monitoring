@@ -1171,11 +1171,11 @@ def generate_dashboard_html(csv_path, output_path, days=30, env_days=8,
                 'email': 'ni-email', 'info': 'ni-info', 'mute': 'ni-mute'}
     # Dot color follows the worst severity: red = alert, orange = warn, green = ok
     if any(s == 'alert' for s, _ in _notif_rows):
-        _dot_html = ' <span class="status-fault">&#9679;</span>'
+        _dot_html = ' <span class="status-dot status-fault"></span>'
     elif any(s == 'warn' for s, _ in _notif_rows):
-        _dot_html = ' <span class="status-warn">&#9679;</span>'
+        _dot_html = ' <span class="status-dot status-warn"></span>'
     else:
-        _dot_html = ' <span class="status-ok">&#9679;</span>'
+        _dot_html = ' <span class="status-dot status-ok"></span>'
     notif_panel_html = (
         '<div class="notif-wrap">'
         f'<button class="notif-btn" onclick="document.getElementById(\'notif-drop\').classList.toggle(\'open\')">'
@@ -1492,9 +1492,24 @@ def generate_dashboard_html(csv_path, output_path, days=30, env_days=8,
 
   .notif-btn:hover {{ border-color: var(--accent-iu-light); color: var(--text-accent); }}
 
-  .notif-btn .status-fault,
-  .notif-btn .status-warn,
-  .notif-btn .status-ok {{ font-size: 40px; line-height: 0; margin-left: 3px; display: inline-flex; align-items: center; transform: translateY(-1px); }}
+  .notif-btn .status-dot {{
+    width: 13px;
+    height: 13px;
+
+    border-radius: 50%;
+    display: inline-block;
+
+    margin-left: 6px;
+
+    position: relative;
+    top: -1px;          /* fine tuning */
+  }}
+
+  .notif-btn .status-fault {{ background: var(--status-fault); }}
+  .notif-btn .status-warn  {{ background: var(--status-warn); }}
+  .notif-btn .status-ok    {{ background: var(--status-ok); }}
+
+
 
   .notif-drop {{
     display: none; position: absolute; right: 0; top: calc(100% + 6px);
